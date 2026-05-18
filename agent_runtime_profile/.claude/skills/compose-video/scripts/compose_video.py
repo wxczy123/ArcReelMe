@@ -17,9 +17,39 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+def _find_repo_root(start: Path) -> Path:
+    """向上回溯定位含 pyproject.toml 的目录，覆盖源/物化/editable 三种部署形态。"""
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    raise RuntimeError(
+        f"无法从 {start} 向上找到 pyproject.toml。"
+        "请确认脚本位于 ArcReel 仓库内（源 profile 或物化版 .claude 目录都可）。"
+    )
+
+
+# sys.path 注入必须在 `from lib...` 之前完成，因此只能在 module 顶层执行。
+PROJECT_ROOT = _find_repo_root(Path(__file__).resolve())
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from lib.project_manager import ProjectManager
 
 FFMPEG_TOOLS_HINT = "需要 ffmpeg 和 ffprobe 同时可用，并且都在 PATH 中"
+
+
+def _require_project_cwd() -> tuple[ProjectManager, str, Path]:
+    """cwd 必须含 project.json，否则拒绝执行。
+
+    替代 ProjectManager.from_cwd()：cwd 漂离项目目录时显式报错，
+    而不是悄悄拼出错误的项目名继续执行。
+    """
+    cwd = Path.cwd().resolve()
+    if not (cwd / "project.json").is_file():
+        raise RuntimeError(f"必须在项目目录内运行（当前 cwd={cwd} 不含 project.json）")
+    pm = ProjectManager(str(cwd.parent))
+    return pm, cwd.name, cwd
 
 
 def check_ffmpeg():
@@ -447,11 +477,20 @@ def compose_video(
     Returns:
         输出视频路径
     """
-    pm, project_name = ProjectManager.from_cwd()
-    project_dir = pm.get_project_path(project_name)
+    pm, project_name, project_dir = _require_project_cwd()
 
-    # 加载剧本
+    # 加载剧本（pm.load_script 内部已用 _safe_subpath 过滤 ../ 等逃逸尝试）
     script = pm.load_script(project_name, script_filename)
+
+    # 仅支持 drama 模式（顶层 scenes[]）；narration/reference_video 给友好错误
+    if "scenes" not in script:
+        content_mode = script.get("content_mode") or "unknown"
+        generation_mode = script.get("generation_mode") or "storyboard"
+        raise RuntimeError(
+            f"compose_video.py 目前仅支持 drama 模式（剧本顶层需有 scenes[]）；"
+            f"当前剧本 content_mode={content_mode}, generation_mode={generation_mode}，"
+            "请使用 Web 端剪映草稿导出"
+        )
 
     # 收集视频片段
     video_paths = []
@@ -462,9 +501,15 @@ def compose_video(
         if not video_clip:
             raise ValueError(f"场景 {scene['scene_id']} 缺少视频片段")
 
-        video_path = project_dir / video_clip
-        if not video_path.exists():
-            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+        # 与 --music / output 同样的围栏：剧本里 video_clip 写成绝对路径或 ../
+        # 形式时，未 resolve 的 `project_dir / video_clip` 会落到项目外（且字面
+        # 前缀能骗过 is_relative_to），ffmpeg 会真的去读项目外文件
+        candidate = Path(video_clip)
+        video_path = (candidate if candidate.is_absolute() else project_dir / candidate).resolve()
+        if not video_path.is_relative_to(project_dir):
+            raise ValueError(f"视频文件必须位于项目目录内，收到: {video_clip}")
+        if not video_path.is_file():
+            raise FileNotFoundError(f"视频文件不存在或不是普通文件: {video_path}")
 
         video_paths.append(video_path)
         transitions.append(scene.get("transition_to_next", "cut"))
@@ -474,13 +519,34 @@ def compose_video(
 
     print(f"📹 共 {len(video_paths)} 个视频片段")
 
-    # 确定输出路径
+    # 确定输出路径：强制落在 project_dir/output/ 内，拒绝 ../ 逃逸
     if output_filename is None:
         chapter = script["novel"].get("chapter", "output").replace(" ", "_")
         output_filename = f"{chapter}_final.mp4"
 
-    output_path = project_dir / "output" / output_filename
+    # 防御 output/ 软链接绕过：若 `project_dir/output` 本身指向项目外目录，
+    # resolve 后的 output_dir 会落到项目外，is_relative_to 校验同样会放行——
+    # 与 source/ 对称，这里在 resolve 前显式拒绝。
+    output_dir_unresolved = project_dir / "output"
+    if output_dir_unresolved.is_symlink():
+        raise ValueError(f"output/ 不能是符号链接（避免合成产物落到项目外）: {output_dir_unresolved}")
+    output_dir = output_dir_unresolved.resolve()
+    output_path = (output_dir / output_filename).resolve()
+    if not output_path.is_relative_to(output_dir):
+        raise ValueError(f"输出文件名逃逸到 output/ 之外: {output_filename}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # music 路径围栏 + 存在性 fail-fast 前置校验：不要让用户等到视频拼完才发现
+    # BGM 路径越界或文件缺失（自动化场景下静默 warning 容易把失败当成功处理）
+    music_file: Path | None = None
+    if music_path:
+        # 相对路径基于 project_dir 解析；绝对路径必须本身在 project_dir 内
+        candidate = Path(music_path)
+        music_file = (candidate if candidate.is_absolute() else project_dir / music_path).resolve()
+        if not music_file.is_relative_to(project_dir):
+            raise ValueError(f"BGM 文件必须位于项目目录内，收到: {music_path}")
+        if not music_file.is_file():
+            raise FileNotFoundError(f"BGM 文件不存在或不是普通文件: {music_file}")
 
     # 合成视频
     print("🎬 正在合成视频...")
@@ -492,20 +558,13 @@ def compose_video(
 
     print(f"✅ 视频合成完成: {output_path}")
 
-    # 添加背景音乐
-    if music_path:
-        music_file = Path(music_path)
-        if not music_file.exists():
-            music_file = project_dir / music_path
-
-        if music_file.exists():
-            print("🎵 正在添加背景音乐...")
-            final_output = output_path.with_stem(output_path.stem + "_with_music")
-            add_background_music(output_path, music_file, final_output)
-            output_path = final_output
-            print(f"✅ 背景音乐添加完成: {output_path}")
-        else:
-            print(f"⚠️  背景音乐文件不存在: {music_path}")
+    # 添加背景音乐（存在性已在前置校验保证）
+    if music_file is not None:
+        print("🎵 正在添加背景音乐...")
+        final_output = output_path.with_stem(output_path.stem + "_with_music")
+        add_background_music(output_path, music_file, final_output)
+        output_path = final_output
+        print(f"✅ 背景音乐添加完成: {output_path}")
 
     return output_path
 

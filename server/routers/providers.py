@@ -456,15 +456,19 @@ async def upload_vertex_credential(
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dest.with_suffix(".tmp")
     tmp_path.write_bytes(contents)
-    try:
-        os.chmod(tmp_path, 0o600)
-    except OSError:
-        logger.warning("无法设置临时凭证文件权限: %s", tmp_path, exc_info=True)
+    # chmod 0o600 在 Windows 上只控制只读位，无法限制其他用户访问；
+    # Windows 上凭证保护交给文件系统 ACL（用户级 %LOCALAPPDATA%）。
+    if os.name == "posix":
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            logger.warning("无法设置临时凭证文件权限: %s", tmp_path, exc_info=True)
     os.replace(tmp_path, dest)
-    try:
-        os.chmod(dest, 0o600)
-    except OSError:
-        logger.warning("无法设置凭证文件权限: %s", dest, exc_info=True)
+    if os.name == "posix":
+        try:
+            os.chmod(dest, 0o600)
+        except OSError:
+            logger.warning("无法设置凭证文件权限: %s", dest, exc_info=True)
 
     await repo.update(cred.id, credentials_path=str(dest))
     await session.commit()
@@ -488,7 +492,7 @@ def _test_gemini_aistudio(config: dict[str, str], _t: Callable[..., str]) -> Con
     api_key = config["api_key"]
     base_url = normalize_base_url(config.get("base_url"))
     http_options = {"base_url": base_url} if base_url else None
-    client = genai.Client(api_key=api_key, http_options=http_options)
+    client = genai.Client(api_key=api_key, http_options=http_options)  # type: ignore[arg-type]
 
     pager = client.models.list()
     available = _extract_gemini_models(pager)
@@ -512,7 +516,7 @@ def _test_gemini_vertex(config: dict[str, str], _t: Callable[..., str]) -> Conne
             message=_t("file_not_found", path=credentials_path),
         )
 
-    with open(credentials_path) as f:
+    with open(credentials_path, encoding="utf-8") as f:
         creds_data = json.load(f)
 
     project_id = creds_data.get("project_id")
@@ -561,7 +565,7 @@ def _test_ark(config: dict[str, str], _t: Callable[..., str]) -> ConnectionTestR
     """通过 tasks.list 验证 Ark API Key。"""
     from lib.ark_shared import create_ark_client
 
-    client = create_ark_client(api_key=config["api_key"])
+    client = create_ark_client(api_key=config["api_key"], base_url=config.get("base_url"))
     # 轻量级调用验证连通性，不创建任何资源
     client.content_generation.tasks.list(page_size=1)
     return ConnectionTestResponse(
@@ -622,6 +626,7 @@ _TEST_DISPATCH: dict[str, Callable[[dict[str, str], Any], ConnectionTestResponse
     "gemini-aistudio": _test_gemini_aistudio,
     "gemini-vertex": _test_gemini_vertex,
     "ark": _test_ark,
+    "ark-agent-plan": _test_ark,
     "grok": _test_grok,
     "openai": _test_openai,
     "vidu": _test_vidu,
@@ -654,6 +659,13 @@ async def test_provider_connection(
     svc = ConfigService(session)
     config = await svc.get_provider_config(provider_id)
     cred.overlay_config(config)
+
+    # 与 generation_tasks._fill_simple_provider_kwargs 对称：用户未显式配 base_url
+    # 时，注入 ProviderMeta.default_base_url，使连接测试命中正确 endpoint。
+    if not config.get("base_url"):
+        meta = PROVIDER_REGISTRY.get(provider_id)
+        if meta and meta.default_base_url:
+            config["base_url"] = meta.default_base_url
 
     test_fn = _TEST_DISPATCH.get(provider_id)
     if test_fn is None:

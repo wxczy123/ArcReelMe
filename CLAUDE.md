@@ -26,6 +26,7 @@ uv run uvicorn server.app:app --reload --reload-dir server --reload-dir lib --po
 
 uv run python -m pytest                              # 测试（-v 单文件 / -k 关键字 / --cov 覆盖率）
 uv run ruff check . && uv run ruff format .          # lint + format
+uv run basedpyright                                  # 类型检查（CI 强制 0 error）
 uv sync                                              # 安装依赖
 uv run alembic upgrade head                          # 数据库迁移
 uv run alembic revision --autogenerate -m "desc"     # 生成迁移
@@ -74,8 +75,8 @@ pnpm build       # 生产构建，含 typecheck
 
 ### lib/ 核心模块
 
-- **{gemini,ark,grok,openai}_shared** + **httpx_shared** — 各供应商 SDK 工厂与共享工具
-- **image_backends/** / **video_backends/** / **text_backends/** — 多供应商媒体生成后端，Registry + Factory 模式（gemini/ark/grok/openai；video 还有 newapi）
+- **{gemini,ark,grok,openai,vidu}_shared** + **httpx_shared** — 各供应商 SDK 工厂与共享工具
+- **image_backends/** / **video_backends/** / **text_backends/** — 多供应商媒体后端，Registry + Factory 模式（vidu 仅 image/video；video 额外有 newapi 中转）
 - **custom_provider/** — 自定义供应商支持：后端包装、模型发现、工厂创建（OpenAI/Google 兼容）
 - **MediaGenerator** (`media_generator.py`) — 组合后端 + VersionManager + UsageTracker
 - **GenerationQueue** (`generation_queue.py`) — 异步任务队列，SQLAlchemy ORM 后端，lease-based 并发控制
@@ -111,7 +112,8 @@ ConfigService（`service.py`）→ Repository（持久化 + 密钥脱敏）→ R
 - `SessionActor` (`session_actor.py`) — 每会话一个专属 asyncio task，串行化所有 ClaudeSDKClient 调用（spec: `docs/superpowers/specs/2026-04-13-session-actor-design.md`）
 - `SessionStore` (`session_store.py`) — 会话元数据 + transcript DB 镜像（受 `ARCREEL_SDK_SESSION_STORE` 环境变量控制：`db`/`off`，off 时回退到 SDK 自带的 jsonl 路径）
 - `StreamProjector` — 从流式事件构建实时助手回复
-- `turn_grouper` / `turn_schema` / `transcript_reader` — transcript 分组与读取（用于历史回放）
+- `sdk_transcript_adapter` / `turn_schema` — transcript 读取与 Turn 规范化（用于历史回放）
+- `sdk_tools/` — SDK 进程内 MCP 工具（enqueue_assets/grid/storyboards/videos + text_generation），供 Skill 调用，由 agent profile manifest 注入
 
 ### lib/i18n/ — 国际化
 
@@ -154,18 +156,44 @@ ConfigService（`service.py`）→ Repository（持久化 + 密钥脱敏）→ R
 `lib/script_models.py` 定义 `NarrationSegment` 和 `DramaScene`，用于剧本验证。
 `lib/data_validator.py` 验证 `project.json` 和剧集 JSON 的结构与引用完整性。
 
+### 内容模式 (content_mode) 与生成模式 (generation_mode)
+
+两条独立维度，分别承载"内容类型"与"视频来源"：
+
+- **content_mode** — `narration`（说书，按朗读节奏拆片段）/ `drama`（剧集动画，按场景对话组织）。决定 `lib/script_models.py` 的剧本结构（`NarrationSegment` vs `DramaScene`），以及 agent profile 加载哪个 `CLAUDE.*.md` 变体
+- **generation_mode** — `reference_video` 等。决定视频生成路径：图生视频（默认，分镜图驱动）/ 宫格生视频（grid_4/6/9 拆首尾帧）/ 参考生视频（资产图直出，跳过分镜步骤，见 `lib/reference_video/`）
+- 两字段对 LLM 隐藏（`SkipJsonSchema`），由编排层注入；不要让 Skill/Subagent 自己推断
+
+## Agent 沙箱
+
+Linux/macOS 默认通过 bwrap 在 Agent 工具调用外围加一层隔离（文件系统/网络/子进程白名单），
+由 `server/app.py::check_sandbox_available` 探测并启用。写新 Agent 工具时假设沙箱**默认开启**：
+路径越界、外发请求会被拒绝，需要时显式声明权限。
+
+Windows 原生无 bwrap，会自动降级：
+
+- `check_sandbox_available` 返回 False，Agent Bash 工具改走 `_WINDOWS_BASH_PREFIX_WHITELIST` 代码白名单
+  （比沙箱粗粒度，能放过的命令前缀有限），WSL2/Docker 部署仍走完整沙箱
+- 新加 Agent 工具时如果依赖沙箱内才有的能力（如 bind mount 隔离 cwd），需要写明 Windows 下的降级路径，
+  或在 `check_sandbox_available()` 失败时显式拒绝运行而非默默放行
+
 ## 智能体运行环境
 
-智能体专用配置（skills、agents、系统 prompt）位于 `agent_runtime_profile/` 目录，
-与开发态 `.claude/` 物理分离。Skill 的创建、评估和维护流程参考 `/skill-creator` skill。
+智能体专用配置位于 `agent_runtime_profile/`，与开发态 `.claude/` 物理分离：
+
+- `.claude/skills/` `.claude/agents/` — Skill 与 Subagent 定义
+- `CLAUDE.narration.md` / `CLAUDE.drama.md` — 按 `content_mode` 拆分的系统 prompt 变体，运行时按项目内容模式动态注入
+- profile 同步由 `lib/profile_manifest.py` 通过 manifest + sha256 驱动，仅复制声明过且校验通过的文件，避免本地脏改污染项目
+
+Skill 的创建、评估和维护流程参考 `/skill-creator` skill。
 
 - **SKILL.md 与脚本同步**：修改 skill 脚本时需同步更新 SKILL.md，反之亦然，二者必须保持一致
 
 ## 国际化 (i18n) 规范
 
-- 禁止硬编码中文字符串，新增面向用户的文本须同时添加 `zh`/`en` 翻译 key
+- 禁止硬编码中文字符串，新增面向用户的文本须同时添加 `zh`/`en`/`vi` 翻译 key
 - 后端：`_t: Translator` 依赖注入；前端：`useTranslation("namespace")`
-- CI 有 `test_i18n_consistency.py` 校验 key 漂移
+- CI 有 `tests/test_i18n_consistency.py` 校验 zh/en/vi 三语 key 不漂移
 
 ## 环境配置
 
@@ -173,8 +201,21 @@ ConfigService（`service.py`）→ Repository（持久化 + 密钥脱敏）→ R
 API Key、后端选择、模型配置等通过 WebUI 配置页（`/settings`）管理。
 外部工具依赖：`ffmpeg`（视频拼接与后期处理）。
 
+## Windows 兼容性
+
+主开发平台是 macOS / Linux，但 server 必须能在 Windows 上完成项目创建与基础流程。涉及文件系统、子进程、tmp 路径、权限的新代码遵循：
+
+- **POSIX-only `os` 常量** — `O_NOFOLLOW` / `O_DIRECT` 等用 `getattr(os, "O_NOFOLLOW", 0)`，Python 层 `is_symlink()` 兜底（例：`lib/profile_manifest.py::_project_lock`）
+- **`os.chmod(0o600)`** — 包 `if os.name == "posix":` guard；Windows 凭证保护交给 ACL（用户级 `%LOCALAPPDATA%`）
+- **文件 I/O 显式 `encoding="utf-8"`** — 否则 Windows 默认 cp936/cp1252 会破坏 UTF-8 文本
+- **tmp 路径用 `tempfile.gettempdir()`** — 不硬编码 `/tmp`；匹配 Claude SDK tmp 输出时 tempdir + POSIX 别名都列上
+- **subprocess 用 `create_subprocess_exec`（list 形式）** — 避免 `shell=True`；ffmpeg/ffprobe 先 `shutil.which()` 探测，缺失时降级而非硬失败
+- **Sandbox Windows 自动降级** — Bash 工具回退到 `_WINDOWS_BASH_PREFIX_WHITELIST` 白名单，生产仍推荐 WSL2/Docker
+- **长路径** — Windows 10 1607+ 需 `LongPathsEnabled=1` 解除 MAX_PATH (260) 限制
+
 ### 代码质量
 
 - **ruff**：line-length 120，提交前对修改的 Python 文件执行 `uv run ruff check <files> && uv run ruff format <files>`
+- **basedpyright**：standard 模式 + `reportMissingTypeStubs = false`，CI 强制 0 error，pre-push hook 跑全量扫描；本地随手 `uv run basedpyright` 校验。tests/ 内 `reportOptional*` 和 `unknown*` 系列降级为 warning，避免 mock-heavy 测试噪声；第三方 untyped 库（ffmpeg-python、pyJianYingDraft、volcenginesdkarkruntime、xai_sdk.chat、docx2txt/mammoth/ebooklib）通过行级 `# pyright: ignore[...]` 处理
 - **pytest**：`asyncio_mode = "auto"`，CI 覆盖率 ≥80%，共用 fixtures 在 `tests/conftest.py`
-- **i18n 一致性**：`tests/test_i18n_consistency.py` 校验 zh/en key 不漂移；新增 i18n key 时双语都要补全
+- **i18n 一致性**：`tests/test_i18n_consistency.py` 校验 zh/en/vi 三语 key 不漂移；新增 i18n key 时三语都要补全

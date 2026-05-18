@@ -61,7 +61,7 @@ class GeminiVideoBackend:
             if credentials_file is None:
                 raise ValueError("未找到 Vertex AI 凭证文件")
 
-            with open(credentials_file) as f:
+            with open(credentials_file, encoding="utf-8") as f:
                 creds_data = json_module.load(f)
             self._project_id = creds_data.get("project_id")
 
@@ -79,7 +79,7 @@ class GeminiVideoBackend:
             api_key = resolve_gemini_api_key(api_key)
             effective_base_url = normalize_base_url(base_url)
             http_options = {"base_url": effective_base_url} if effective_base_url else None
-            self._client = _genai.Client(api_key=api_key, http_options=http_options)
+            self._client = _genai.Client(api_key=api_key, http_options=http_options)  # type: ignore[arg-type]
 
         # 缓存 capabilities，避免每次访问创建新 set
         self._capabilities: set[VideoCapability] = {

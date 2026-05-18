@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lib.config.registry import PROVIDER_REGISTRY
 from lib.config.resolver import ConfigResolver
 from lib.custom_provider import is_custom_provider, parse_provider_id
 from lib.db import async_session_factory
@@ -13,6 +14,7 @@ PROVIDER_ID_TO_BACKEND: dict[str, str] = {
     "gemini-aistudio": "gemini",
     "gemini-vertex": "gemini",
     "ark": "ark",
+    "ark-agent-plan": "ark-agent-plan",
     "grok": "grok",
     "openai": "openai",
 }
@@ -64,7 +66,10 @@ async def create_text_backend_for_task(
                         raise ValueError(f"供应商「{name}」没有可用的文本模型，请到项目设置中重新选择")
                     model = default_model
                     model_id = default_model.model_id
-                return create_custom_backend(provider=provider, model_id=model_id, endpoint=model.endpoint)
+                assert model_id is not None
+                return create_custom_backend(  # type: ignore[return-value]
+                    provider=provider, model_id=model_id, endpoint=model.endpoint
+                )
 
         provider_config = await r.provider_config(provider_id)
 
@@ -76,7 +81,16 @@ async def create_text_backend_for_task(
         kwargs["gcs_bucket"] = provider_config.get("gcs_bucket")
     else:
         kwargs["api_key"] = provider_config.get("api_key")
+        user_base_url = provider_config.get("base_url")
         if provider_id in ("gemini-aistudio", PROVIDER_OPENAI):
-            kwargs["base_url"] = provider_config.get("base_url")
+            # 这两个允许用户填自定义 endpoint，没有 registry default。
+            kwargs["base_url"] = user_base_url
+        else:
+            # ark / ark-agent-plan 等：用户优先，缺省回落 ProviderMeta.default_base_url
+            # （与 server.services.generation_tasks._fill_simple_provider_kwargs 对称）。
+            meta = PROVIDER_REGISTRY.get(provider_id)
+            base_url = user_base_url or (meta.default_base_url if meta else None)
+            if base_url:
+                kwargs["base_url"] = base_url
 
     return create_backend(backend_name, **kwargs)

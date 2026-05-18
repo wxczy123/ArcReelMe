@@ -47,7 +47,7 @@ rate_limiter = get_shared_rate_limiter()
 logger = logging.getLogger(__name__)
 
 # 按 (channel, provider_name, model) 缓存 Backend 实例，避免每次任务重建 API 客户端
-_backend_cache: dict[tuple[str, ...], Any] = {}
+_backend_cache: dict[tuple[str, str, str | None], Any] = {}
 
 # 新 provider_id → 旧 backend registry name 的映射
 _PROVIDER_ID_TO_BACKEND: dict[str, str] = {
@@ -190,6 +190,7 @@ async def _create_custom_backend(provider_name: str, model_id: str | None, media
             model = default_model
             model_id = default_model.model_id
 
+        assert model_id is not None
         return create_custom_backend(provider=provider, model_id=model_id, endpoint=model.endpoint)
 
 
@@ -251,11 +252,18 @@ async def _fill_simple_provider_kwargs(
     kwargs: dict,
     effective_model: str | None,
 ) -> None:
-    """Ark/Grok/OpenAI 等简单供应商的通用配置填充。"""
+    """Ark/Grok/OpenAI 等简单供应商的通用配置填充。
+
+    base_url 优先级：用户在 DB 配置中显式填写 > ProviderMeta.default_base_url > 不传。
+    """
+    from lib.config.registry import PROVIDER_REGISTRY
+
     db_config = await resolver.provider_config(backend_name)
     kwargs["api_key"] = db_config.get("api_key")
     kwargs["model"] = effective_model
-    if base_url := db_config.get("base_url"):
+    meta = PROVIDER_REGISTRY.get(backend_name)
+    base_url = db_config.get("base_url") or (meta.default_base_url if meta else None)
+    if base_url:
         kwargs["base_url"] = base_url
 
 
@@ -384,8 +392,8 @@ async def get_media_generator(
     return MediaGenerator(
         project_path,
         rate_limiter=rate_limiter,
-        image_backend=image_backend,
-        video_backend=video_backend,
+        image_backend=image_backend,  # type: ignore[arg-type]
+        video_backend=video_backend,  # type: ignore[arg-type]
         config_resolver=resolver,
         user_id=user_id,
     )
@@ -422,7 +430,8 @@ def _normalize_storyboard_prompt(prompt: str | dict, style: str) -> str:
     if not scene_text:
         raise ValueError("prompt.scene must not be empty")
 
-    composition = prompt.get("composition") if isinstance(prompt.get("composition"), dict) else {}
+    composition_raw = prompt.get("composition")
+    composition: dict = composition_raw if isinstance(composition_raw, dict) else {}
     normalized_prompt = {
         "scene": scene_text,
         "composition": {
@@ -863,7 +872,7 @@ async def execute_video_task(
     # duration fallback: payload > project.default_duration > supported_durations[0] > 4
     duration_seconds = payload.get("duration_seconds") or project.get("default_duration")
     if not duration_seconds:
-        duration_seconds = _get_model_default_duration(registry_provider_id, model_name)
+        duration_seconds = _get_model_default_duration(registry_provider_id or provider_name, model_name)
 
     end_image = None  # 宫格模式不再使用首尾帧，统一走普通图生视频
 
@@ -1243,7 +1252,7 @@ async def execute_grid_task(
         storyboards_dir.mkdir(parents=True, exist_ok=True)
 
         def _assign_cells():
-            asset_updates: list[tuple[str, str, str]] = []
+            asset_updates: list[tuple[str, str, Any]] = []
 
             # 宫格已统一走普通图生视频（不再使用 first_last 模式），cell 仅作为
             # next_scene_id 的起始分镜图，文件名与普通分镜对齐为 scene_{id}.png。
@@ -1325,6 +1334,8 @@ async def execute_generation_task(task: dict[str, Any]) -> dict[str, Any]:
 
     if not project_name:
         raise ValueError("task.project_name is required")
+    if not task_type:
+        raise ValueError("task.task_type is required")
 
     executor = _TASK_EXECUTORS.get(task_type)
     if executor is None:
