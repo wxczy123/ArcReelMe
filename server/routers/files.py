@@ -93,12 +93,12 @@ async def serve_project_file(project_name: str, path: str, request: Request, _t:
         raise HTTPException(status_code=404, detail=_t("project_not_found", name=project_name))
 
 
-@router.get("/global-assets/{asset_type}/{filename}")
+@router.get("/global-assets/{asset_type}/{filename:path}")
 async def serve_global_asset(asset_type: str, filename: str, _t: Translator):
     """服务 _global_assets 下的全局资产图片（character/scene/prop）"""
     if asset_type not in ASSET_TYPES:
         raise HTTPException(status_code=400, detail=_t("invalid_asset_type"))
-    if "/" in filename or ".." in filename:
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
         raise HTTPException(status_code=400, detail=_t("invalid_asset_filename"))
 
     root = get_project_manager().get_global_assets_root()

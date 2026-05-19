@@ -58,9 +58,9 @@ class TestAssetRouterFactory:
             assert resp.status_code == 200
             entry = fake_pm.projects["demo"]["characters"]["Bob"]
             assert entry["voice_style"] == "calm"
-            assert entry["character_sheet"] == ""
-            # reference_image 是 character 的 extra 字段，create 时未传则默认 ""
-            assert entry["reference_image"] == ""
+            assert entry["default_form"] == "default"
+            assert entry["forms"]["default"]["refs"]["full_body"]["path"] == ""
+            assert entry["forms"]["default"]["refs"]["three_view"]["path"] == ""
 
     def test_character_post_409_on_duplicate(self, monkeypatch):
         client, fake_pm = _client(monkeypatch)
@@ -98,7 +98,8 @@ class TestAssetRouterFactory:
             assert resp.status_code == 200
             entry = fake_pm.projects["demo"]["characters"]["Alice"]
             assert entry["voice_style"] == "strong"
-            assert entry["reference_image"] == "characters/refs/Alice.png"
+            assert entry["forms"]["default"]["refs"]["full_body"]["path"] == "characters/Alice.png"
+            assert "reference_image" not in entry
 
     def test_character_patch_rejects_non_string_value(self, monkeypatch):
         client, fake_pm = _client(monkeypatch)
@@ -111,7 +112,7 @@ class TestAssetRouterFactory:
         with client:
             resp = client.patch(
                 "/api/v1/projects/demo/characters/Alice",
-                json={"reference_image": {"foo": "bar"}},
+                json={"character_sheet": {"foo": "bar"}},
             )
             assert resp.status_code == 422
             # entry 未被污染

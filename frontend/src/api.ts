@@ -44,6 +44,7 @@ import type {
   ReferenceVideoUnit,
   ReferenceResource,
   TransitionType,
+  CharacterRefSlot,
 } from "@/types";
 import type { GenerationMode } from "@/utils/generation-mode";
 import type { GridGeneration } from "@/types/grid";
@@ -550,6 +551,100 @@ class API {
     );
   }
 
+  static async addCharacterForm(
+    projectName: string,
+    charName: string,
+    payload: { form_id: string; label?: string; description?: string }
+  ): Promise<SuccessResponse> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  static async updateCharacterForm(
+    projectName: string,
+    charName: string,
+    formId: string,
+    updates: {
+      label?: string;
+      description?: string;
+      storyboard_ref_slot?: CharacterRefSlot;
+      default_form?: boolean;
+    }
+  ): Promise<SuccessResponse> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms/${encodeURIComponent(formId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+      }
+    );
+  }
+
+  static async deleteCharacterForm(
+    projectName: string,
+    charName: string,
+    formId: string
+  ): Promise<SuccessResponse> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms/${encodeURIComponent(formId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  static async uploadCharacterFormRef(
+    projectName: string,
+    charName: string,
+    formId: string,
+    slot: CharacterRefSlot,
+    file: File
+  ): Promise<{ success: boolean; path: string; url: string }> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(
+      `${API_BASE}/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms/${encodeURIComponent(formId)}/refs/${encodeURIComponent(slot)}`,
+      withAuth({ method: "POST", body: form })
+    );
+    await throwIfNotOk(response, "上传失败");
+    return response.json() as Promise<{ success: boolean; path: string; url: string }>;
+  }
+
+  static async uploadCharacterInputRef(
+    projectName: string,
+    charName: string,
+    formId: string,
+    file: File
+  ): Promise<{ success: boolean; path: string; url: string }> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(
+      `${API_BASE}/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms/${encodeURIComponent(formId)}/input-refs`,
+      withAuth({ method: "POST", body: form })
+    );
+    await throwIfNotOk(response, "上传失败");
+    return response.json() as Promise<{ success: boolean; path: string; url: string }>;
+  }
+
+  static async deleteCharacterInputRef(
+    projectName: string,
+    charName: string,
+    formId: string,
+    path: string
+  ): Promise<{ success: boolean; path: string }> {
+    const response = await this.request(
+      `/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}/forms/${encodeURIComponent(formId)}/input-refs`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ path }),
+      }
+    );
+    return response as Promise<{ success: boolean; path: string }>;
+  }
+
   // ==================== 项目场景管理 ====================
 
   static async addProjectScene(
@@ -1004,6 +1099,26 @@ class API {
     );
   }
 
+  static async generateCharacterRef(
+    projectName: string,
+    charName: string,
+    formId: string,
+    slot: CharacterRefSlot,
+    prompt?: string
+  ): Promise<{
+    success: boolean;
+    task_id: string;
+    message: string;
+  }> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/generate/character-ref/${encodeURIComponent(charName)}/${encodeURIComponent(formId)}/${encodeURIComponent(slot)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ prompt: prompt ?? "" }),
+      }
+    );
+  }
+
   /**
    * 生成场景设计图
    * @param projectName - 项目名称
@@ -1238,8 +1353,12 @@ class API {
     current_version: number;
     versions: VersionInfo[];
   }> {
+    const encodedResourceId =
+      resourceType === "character_refs"
+        ? resourceId.split("/").map(encodeURIComponent).join("/")
+        : encodeURIComponent(resourceId);
     return this.request(
-      `/projects/${encodeURIComponent(projectName)}/versions/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`
+      `/projects/${encodeURIComponent(projectName)}/versions/${encodeURIComponent(resourceType)}/${encodedResourceId}`
     );
   }
 
@@ -1256,8 +1375,12 @@ class API {
     resourceId: string,
     version: number
   ): Promise<SuccessResponse & { file_path?: string; asset_fingerprints?: Record<string, number> }> {
+    const encodedResourceId =
+      resourceType === "character_refs"
+        ? resourceId.split("/").map(encodeURIComponent).join("/")
+        : encodeURIComponent(resourceId);
     return this.request(
-      `/projects/${encodeURIComponent(projectName)}/versions/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}/restore/${version}`,
+      `/projects/${encodeURIComponent(projectName)}/versions/${encodeURIComponent(resourceType)}/${encodedResourceId}/restore/${version}`,
       {
         method: "POST",
       }

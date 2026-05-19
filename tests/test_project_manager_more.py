@@ -291,7 +291,12 @@ class TestProjectManagerMore:
         pm.add_project_character("demo", "Alice", "hero", "soft")
         pm.update_project_character_sheet("demo", "Alice", "characters/Alice.png")
         pm.update_character_reference_image("demo", "Alice", "characters/refs/Alice.png")
-        assert pm.get_project_character("demo", "Alice")["reference_image"].endswith("Alice.png")
+        alice = pm.get_project_character("demo", "Alice")
+        assert alice["forms"]["default"]["refs"]["full_body"]["path"].endswith("Alice.png")
+        assert alice["forms"]["default"]["input_refs"][0].endswith("Alice.png")
+        pm.remove_character_input_ref("demo", "Alice", "default", "characters/refs/Alice.png")
+        alice = pm.get_project_character("demo", "Alice")
+        assert alice["forms"]["default"]["input_refs"] == []
 
         # scene lifecycle
         pm.add_scenes_batch("demo", {"客厅": {"description": "宽敞的客厅"}})

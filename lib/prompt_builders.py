@@ -16,16 +16,15 @@ from __future__ import annotations
 # 内部常量：防崩 / 反向 / 布局 / 风格前缀
 # ---------------------------------------------------------------------------
 
-# 角色图采用 issue #353 的四视图 16:9 布局。
-_CHARACTER_LAYOUT = (
-    "横版 16:9 四格布局，纯白 (#FFFFFF) 背景：左侧约 40% 宽为胸像特写（清晰展示面部、发型、配饰、上装），"
-    "右侧三个等宽面板分别为正面 / 四分之三侧面 / 背面的 A-Pose 全身视图。"
+_CHARACTER_FULL_BODY_LAYOUT = (
+    "单人全身主参考图，角色从头到脚完整入画，正面或轻微三分之二角度站姿，纯净浅色背景，不分格、不拼图、不出现第二个人。"
 )
+_CHARACTER_THREE_VIEW_LAYOUT = "三视图角色参考图，纯净浅色背景，横向并列展示同一角色的正面、侧面、背面全身 A-Pose。"
 _SCENE_LAYOUT = "主画面占四分之三区域展示环境整体外观与氛围，右下角嵌入关键细节小图。"
 _PROP_LAYOUT = "三视图水平排列于纯净浅灰背景：左侧正面全视图、中间 45° 侧视图体现立体感、右侧关键细节特写。"
 
 # 正向防崩（按资产类型差异化）。
-_CHARACTER_GUARD = "四个面板中角色面部、发型、服装、配饰完全一致；五官对称、手指完整为五指、肢体比例协调。"
+_CHARACTER_GUARD = "角色面部、发型、服装、配饰保持一致；五官对称、手指完整为五指、肢体比例协调。"
 _SCENE_GUARD = "空间透视正常，陈设固定，光影统一。"
 _PROP_GUARD = "外观结构完整，焦点清晰。"
 
@@ -51,17 +50,55 @@ def _style_prefix(style: str = "", style_description: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_character_prompt(name: str, description: str, style: str = "", style_description: str = "") -> str:
-    """角色设计图 prompt（issue #353 四视图 16:9）。"""
+def build_character_full_body_prompt(
+    name: str,
+    description: str,
+    form_label: str = "",
+    form_description: str = "",
+    style: str = "",
+    style_description: str = "",
+) -> str:
+    """角色单人全身主参考图 prompt。"""
     style_block = _style_prefix(style, style_description)
+    form_block = ""
+    if form_label or form_description:
+        form_block = f"\n\n当前形态：{form_label or '默认造型'}\n{form_description}".rstrip()
     return (
         f"{style_block}"
-        f"角色「{name}」的设计参考图。\n\n"
-        f"{description}\n\n"
-        f"{_CHARACTER_LAYOUT}\n\n"
+        f"角色「{name}」的单人全身主参考图。\n\n"
+        f"跨形态稳定外貌：{description}{form_block}\n\n"
+        f"{_CHARACTER_FULL_BODY_LAYOUT}\n\n"
         f"{_CHARACTER_GUARD}\n\n"
-        f"{_NEGATIVE_TAIL_ASSET}"
+        f"画面避免：水印、多余文字、低分辨率、手指畸形、分格、多角色、裁切身体。"
     )
+
+
+def build_character_three_view_prompt(
+    name: str,
+    description: str,
+    form_label: str = "",
+    form_description: str = "",
+    style: str = "",
+    style_description: str = "",
+) -> str:
+    """角色三视图 prompt。"""
+    style_block = _style_prefix(style, style_description)
+    form_block = ""
+    if form_label or form_description:
+        form_block = f"\n\n当前形态：{form_label or '默认造型'}\n{form_description}".rstrip()
+    return (
+        f"{style_block}"
+        f"角色「{name}」的三视图一致性参考图。\n\n"
+        f"跨形态稳定外貌：{description}{form_block}\n\n"
+        f"{_CHARACTER_THREE_VIEW_LAYOUT}\n\n"
+        f"{_CHARACTER_GUARD}\n\n"
+        f"画面避免：水印、多余文字、低分辨率、手指畸形、不同人物、服装不一致、裁切身体。"
+    )
+
+
+def build_character_prompt(name: str, description: str, style: str = "", style_description: str = "") -> str:
+    """旧接口：默认生成单人全身主参考图。"""
+    return build_character_full_body_prompt(name, description, "", "", style, style_description)
 
 
 def build_scene_prompt(name: str, description: str, style: str = "", style_description: str = "") -> str:

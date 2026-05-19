@@ -115,6 +115,7 @@ export interface DramaScene {
   segment_break: boolean;
   scene_type: string;
   characters_in_scene: string[];
+  character_forms?: Record<string, string>;
   scenes?: string[];
   props?: string[];
   image_prompt: ImagePrompt | string;

@@ -14,6 +14,16 @@ if TYPE_CHECKING:
 
 from lib.app_data_dir import app_data_dir
 from lib.asset_types import ASSET_SPECS
+from lib.character_assets import (
+    DEFAULT_FORM_ID,
+    character_ref_resource_id,
+    ensure_character_forms,
+    get_ref_path,
+    get_storyboard_ref_path,
+    set_ref_path,
+    validate_form_id,
+    validate_ref_slot,
+)
 from lib.config.registry import PROVIDER_REGISTRY
 from lib.custom_provider import is_custom_provider
 from lib.db.base import DEFAULT_USER_ID
@@ -24,7 +34,12 @@ from lib.image_backends.base import ImageCapabilityError
 from lib.media_generator import MediaGenerator
 from lib.project_change_hints import emit_project_change_batch, project_change_source
 from lib.project_manager import ProjectManager
-from lib.prompt_builders import build_character_prompt, build_prop_prompt, build_scene_prompt
+from lib.prompt_builders import (
+    build_character_full_body_prompt,
+    build_character_three_view_prompt,
+    build_prop_prompt,
+    build_scene_prompt,
+)
 from lib.prompt_utils import (
     image_prompt_to_yaml,
     is_structured_image_prompt,
@@ -400,8 +415,8 @@ async def get_media_generator(
 
 
 def get_aspect_ratio(project: dict, resource_type: str) -> str:
-    if resource_type == "characters":
-        # 角色采用四视图横版（issue #353）
+    if resource_type in {"characters", "character_refs"}:
+        # 角色参考图固定横版，方便全身图/三视图复用。
         return "16:9"
     if resource_type in ("scenes", "props"):
         return "16:9"
@@ -486,6 +501,29 @@ def _normalize_video_prompt(prompt: str | dict) -> str:
     return append_video_negative_tail(video_prompt_to_yaml(normalized_prompt))
 
 
+def _resolve_character_storyboard_ref(project: dict, char_name: str, item: dict) -> tuple[str, str, str] | None:
+    """按 item.character_forms → character.default_form → full_body 解析角色分镜参考图。"""
+    characters = project.get("characters", {})
+    entry = characters.get(char_name)
+    if not isinstance(entry, dict):
+        return None
+    ensure_character_forms(entry)
+    requested_form = None
+    forms_map = item.get("character_forms")
+    if isinstance(forms_map, dict):
+        raw_form = forms_map.get(char_name)
+        if isinstance(raw_form, str) and raw_form:
+            requested_form = raw_form
+    try:
+        form_id, slot, rel_path = get_storyboard_ref_path(entry, requested_form)
+    except KeyError:
+        try:
+            form_id, slot, rel_path = get_storyboard_ref_path(entry, entry.get("default_form") or DEFAULT_FORM_ID)
+        except KeyError:
+            return None
+    return form_id, slot, rel_path
+
+
 def _get_model_default_duration(provider_name: str, model_name: str | None) -> int:
     """从 PROVIDER_REGISTRY 查找模型的 supported_durations[0]，找不到则 fallback 4。"""
     provider_meta = PROVIDER_REGISTRY.get(provider_name)
@@ -507,7 +545,7 @@ def _collect_sheet_paths(
     prop_field: str,
     max_count: int = 0,
 ) -> tuple[list[Path], set[str]]:
-    """Collect character_sheet, scene_sheet and prop_sheet paths from scene/segment items.
+    """Collect character form refs, scene_sheet and prop_sheet paths from scene/segment items.
 
     Returns (list of existing Paths, set of relative sheet strings for dedup).
     If *max_count* > 0 collection stops after that many images.
@@ -515,13 +553,13 @@ def _collect_sheet_paths(
     seen: set[str] = set()
     paths: list[Path] = []
 
-    characters = project.get("characters", {})
     project_scenes = project.get("scenes", {})
     project_props = project.get("props", {})
 
     for item in items:
         for char_name in item.get(char_field, []):
-            sheet = characters.get(char_name, {}).get("character_sheet")
+            resolved = _resolve_character_storyboard_ref(project, char_name, item)
+            sheet = resolved[2] if resolved else ""
             if sheet and sheet not in seen:
                 path = project_path / sheet
                 if path.exists():
@@ -626,6 +664,13 @@ def _compute_affected_fingerprints(project_name: str, task_type: str, resource_i
                 project_path / "characters" / f"{resource_id}.png",
             )
         )
+    elif task_type == "character_ref":
+        paths.append(
+            (
+                f"characters/{resource_id}.png",
+                project_path / "characters" / f"{resource_id}.png",
+            )
+        )
     elif task_type == "scene":
         paths.append(
             (
@@ -676,6 +721,7 @@ _TASK_CHANGE_SPECS: dict[str, tuple] = {
     "video": ("segment", "video_ready", "分镜「{}」", True),
     "grid": ("grid", "grid_ready", "宫格「{}」", True),
     "reference_video": ("reference_video_unit", "reference_video_ready", "参考视频「{}」", True),
+    "character_ref": ("character", "updated", "角色参考图「{}」", False),
     **{atype: (atype, "updated", f"{spec.label_zh}「{{}}」设计图", False) for atype, spec in ASSET_SPECS.items()},
 }
 
@@ -940,25 +986,87 @@ async def execute_video_task(
 async def execute_character_task(
     project_name: str, resource_id: str, payload: dict[str, Any], *, user_id: str = DEFAULT_USER_ID
 ) -> dict[str, Any]:
+    """旧 character 任务兼容：生成默认形态 full_body。"""
+    return await execute_character_ref_task(
+        project_name,
+        character_ref_resource_id(resource_id, DEFAULT_FORM_ID, "full_body"),
+        {
+            **payload,
+            "character": resource_id,
+            "form_id": DEFAULT_FORM_ID,
+            "slot": "full_body",
+        },
+        user_id=user_id,
+    )
+
+
+async def execute_character_ref_task(
+    project_name: str, resource_id: str, payload: dict[str, Any], *, user_id: str = DEFAULT_USER_ID
+) -> dict[str, Any]:
+    """生成角色某形态某槽位参考图（full_body / three_view）。"""
+    character_name = str(payload.get("character") or "").strip()
+    form_id = str(payload.get("form_id") or "").strip()
+    slot = str(payload.get("slot") or "").strip()
+
+    if not (character_name and form_id and slot):
+        parts = resource_id.split("/")
+        if len(parts) == 3:
+            character_name, form_id, slot = parts
+    if not character_name:
+        raise ValueError("character is required for character_ref task")
+    form_id = validate_form_id(form_id or DEFAULT_FORM_ID)
+    slot = validate_ref_slot(slot or "full_body")
+
     prompt = str(payload.get("prompt", "") or "").strip()
-    if not prompt:
-        raise ValueError("prompt is required for character task")
 
     def _prepare_char():
         _project = get_project_manager().load_project(project_name)
         _project_path = get_project_manager().get_project_path(project_name)
-        if resource_id not in _project.get("characters", {}):
-            raise ValueError(f"character not found: {resource_id}")
-        _char_data = _project["characters"][resource_id]
+        if character_name not in _project.get("characters", {}):
+            raise ValueError(f"character not found: {character_name}")
+        _char_data = _project["characters"][character_name]
+        ensure_character_forms(_char_data)
+        _forms = _char_data.get("forms") or {}
+        if form_id not in _forms:
+            raise ValueError(f"character form not found: {character_name}/{form_id}")
+        _form = _forms[form_id]
         _style = _project.get("style", "")
         _style_desc = _project.get("style_description", "")
-        _full_prompt = build_character_prompt(resource_id, prompt, _style, _style_desc)
-        _ref_images = None
-        _ref_path = _char_data.get("reference_image")
-        if _ref_path:
-            _full_ref = _project_path / _ref_path
-            if _full_ref.exists():
-                _ref_images = [_full_ref]
+        _base_description = prompt or _char_data.get("description", "")
+        if not str(_base_description or "").strip() and not str(_form.get("description") or "").strip():
+            raise ValueError("character prompt or description is required")
+        if slot == "three_view":
+            _full_prompt = build_character_three_view_prompt(
+                character_name,
+                _base_description,
+                str(_form.get("label") or form_id),
+                str(_form.get("description") or ""),
+                _style,
+                _style_desc,
+            )
+        else:
+            _full_prompt = build_character_full_body_prompt(
+                character_name,
+                _base_description,
+                str(_form.get("label") or form_id),
+                str(_form.get("description") or ""),
+                _style,
+                _style_desc,
+            )
+        _ref_images: list[Path] = []
+        if slot == "three_view":
+            _full_body_rel = get_ref_path(_char_data, form_id, "full_body")
+            if _full_body_rel:
+                _full_body_path = _project_path / _full_body_rel
+                if _full_body_path.exists():
+                    _ref_images.append(_full_body_path)
+        else:
+            for _ref_path in _form.get("input_refs") or []:
+                if not isinstance(_ref_path, str) or not _ref_path:
+                    continue
+                _full_ref = _project_path / _ref_path
+                if _full_ref.exists():
+                    _ref_images.append(_full_ref)
         return _project, _full_prompt, _ref_images
 
     project, full_prompt, reference_images = await asyncio.to_thread(_prepare_char)
@@ -972,30 +1080,48 @@ async def execute_character_task(
 
     _, version = await generator.generate_image_async(
         prompt=full_prompt,
-        resource_type="characters",
-        resource_id=resource_id,
+        resource_type="character_refs",
+        resource_id=character_ref_resource_id(character_name, form_id, slot),
         reference_images=reference_images,
         aspect_ratio=aspect_ratio,
         image_size=image_size,
+        character=character_name,
+        form_id=form_id,
+        slot=slot,
     )
 
-    sheet_path = f"characters/{resource_id}.png"
+    sheet_path = f"characters/{character_name}/{form_id}/{slot}.png"
 
     def _finalize_char():
-        def _set_character_sheet(p: dict) -> None:
-            p["characters"][resource_id]["character_sheet"] = sheet_path
+        manager = get_project_manager()
+        if hasattr(manager, "update_character_ref_path"):
+            manager.update_character_ref_path(project_name, character_name, form_id, slot, sheet_path)
+        elif slot == "full_body" and form_id == DEFAULT_FORM_ID and hasattr(manager, "update_project_character_sheet"):
+            manager.update_project_character_sheet(project_name, character_name, sheet_path)
+        elif hasattr(manager, "update_project"):
 
-        get_project_manager().update_project(project_name, _set_character_sheet)
-        return generator.versions.get_versions("characters", resource_id)["versions"][-1]["created_at"]
+            def _mutate(project):
+                entry = (project.get("characters") or {}).setdefault(character_name, {})
+                ensure_character_forms(entry)
+                set_ref_path(entry, form_id, slot, sheet_path)
+
+            manager.update_project(project_name, _mutate)
+        version_info = generator.versions.get_versions(
+            "character_refs", character_ref_resource_id(character_name, form_id, slot)
+        )
+        return version_info["versions"][-1]["created_at"]
 
     created_at = await asyncio.to_thread(_finalize_char)
 
     return {
         "version": version,
-        "file_path": f"characters/{resource_id}.png",
+        "file_path": sheet_path,
         "created_at": created_at,
-        "resource_type": "characters",
-        "resource_id": resource_id,
+        "resource_type": "character_refs",
+        "resource_id": character_ref_resource_id(character_name, form_id, slot),
+        "character": character_name,
+        "form_id": form_id,
+        "slot": slot,
     }
 
 
@@ -1121,7 +1247,6 @@ def _collect_grid_reference_images(
     scene_id_set = set(scene_ids)
     matched_items = [item for item in items if str(item.get(id_field, "")) in scene_id_set]
 
-    characters = project.get("characters", {})
     project_scenes = project.get("scenes", {})
     project_props = project.get("props", {})
 
@@ -1132,13 +1257,18 @@ def _collect_grid_reference_images(
 
     for item in matched_items:
         for char_name in item.get(char_field, []):
-            sheet = characters.get(char_name, {}).get("character_sheet")
+            resolved = _resolve_character_storyboard_ref(project, char_name, item)
+            sheet = resolved[2] if resolved else ""
             if sheet and sheet not in seen:
                 p = project_path / sheet
                 if p.exists():
                     paths.append(p)
                     seen.add(sheet)
-                    metadata.append({"path": sheet, "name": char_name, "ref_type": "character"})
+                    meta = {"path": sheet, "name": char_name, "ref_type": "character"}
+                    if resolved:
+                        meta["form_id"] = resolved[0]
+                        meta["slot"] = resolved[1]
+                    metadata.append(meta)
         for scene_name in item.get(scene_field, []):
             sheet = project_scenes.get(scene_name, {}).get("scene_sheet")
             if sheet and sheet not in seen:
@@ -1318,6 +1448,7 @@ _TASK_EXECUTORS = {
     "storyboard": execute_storyboard_task,
     "video": execute_video_task,
     "character": execute_character_task,
+    "character_ref": execute_character_ref_task,
     "scene": execute_scene_task,
     "prop": execute_prop_task,
     "grid": execute_grid_task,

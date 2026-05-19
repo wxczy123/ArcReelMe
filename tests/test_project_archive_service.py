@@ -319,7 +319,7 @@ class TestProjectArchiveService:
     @pytest.mark.parametrize(
         ("field_name", "target_path"),
         [
-            ("characters[Hero].character_sheet", ("characters", "Hero.png")),
+            ("characters[Hero].forms[default].refs[full_body].path", ("characters", "Hero.png")),
             ("props[Key].prop_sheet", ("props", "Key.png")),
             (
                 "segments[0].generated_assets.storyboard_image",

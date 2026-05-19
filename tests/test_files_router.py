@@ -172,8 +172,9 @@ class TestFilesRouter:
 
             # confirm metadata updated for character/prop
             project = pm.load_project("demo")
-            assert project["characters"]["Alice"]["character_sheet"] == "characters/Alice.jpg"
-            assert project["characters"]["Alice"]["reference_image"] == "characters/refs/Alice.webp"
+            default_form = project["characters"]["Alice"]["forms"]["default"]
+            assert default_form["refs"]["full_body"]["path"] == "characters/Alice.jpg"
+            assert default_form["input_refs"] == ["characters/refs/Alice.webp"]
             assert project["props"]["玉佩"]["prop_sheet"] == "props/玉佩.jpg"
 
     def test_style_image_endpoints(self, tmp_path, monkeypatch):

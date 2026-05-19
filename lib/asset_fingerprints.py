@@ -10,15 +10,14 @@ _ROOT_MEDIA_SUFFIXES = frozenset((".png", ".jpg", ".jpeg", ".webp", ".mp4"))
 
 
 def _scan_subdir(prefix: str, dir_path: Path, fingerprints: dict[str, int]) -> None:
-    """扫描单个媒体子目录及其一级子目录（跳过 versions/ 目录）。"""
-    for entry in dir_path.iterdir():
-        if entry.is_file():
-            fingerprints[f"{prefix}/{entry.name}"] = entry.stat().st_mtime_ns
-        elif entry.is_dir() and entry.name != "versions":
-            sub_prefix = f"{prefix}/{entry.name}"
-            for sub_entry in entry.iterdir():
-                if sub_entry.is_file():
-                    fingerprints[f"{sub_prefix}/{sub_entry.name}"] = sub_entry.stat().st_mtime_ns
+    """递归扫描单个媒体子目录（跳过任意层级的 versions/ 目录）。"""
+    for entry in dir_path.rglob("*"):
+        if not entry.is_file():
+            continue
+        rel = entry.relative_to(dir_path)
+        if "versions" in rel.parts:
+            continue
+        fingerprints[f"{prefix}/{rel.as_posix()}"] = entry.stat().st_mtime_ns
 
 
 def compute_asset_fingerprints(project_path: Path) -> dict[str, int]:

@@ -9,7 +9,7 @@ import { errMsg } from "@/utils/async";
 
 interface VersionTimeMachineProps {
   projectName: string;
-  resourceType: "storyboards" | "videos" | "characters" | "scenes" | "props";
+  resourceType: "storyboards" | "videos" | "characters" | "character_refs" | "scenes" | "props";
   resourceId: string;
   onRestore?: (version: number) => void | Promise<void>;
   /** Icon-only trigger button: hides label and chevron for narrow card headers. */
@@ -19,7 +19,7 @@ interface VersionTimeMachineProps {
 function getImagePreviewHeightClass(
   resourceType: VersionTimeMachineProps["resourceType"],
 ): string {
-  if (resourceType === "characters") return "h-80";
+  if (resourceType === "characters" || resourceType === "character_refs") return "h-80";
   if (resourceType === "scenes" || resourceType === "props") return "h-56";
   return "h-64";
 }
@@ -48,6 +48,7 @@ export function VersionTimeMachine({
     resourceType === "storyboards" ? `storyboards/scene_${resourceId}.png` :
     resourceType === "videos" ? `videos/scene_${resourceId}.mp4` :
     resourceType === "characters" ? `characters/${resourceId}.png` :
+    resourceType === "character_refs" ? `characters/${resourceId}.png` :
     resourceType === "scenes" ? `scenes/${resourceId}.png` :
     `props/${resourceId}.png`;
   const resourceFp = useProjectsStore((s) => s.getAssetFingerprint(resourcePath));

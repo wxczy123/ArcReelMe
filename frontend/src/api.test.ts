@@ -300,6 +300,8 @@ describe("API", () => {
       await API.getTaskStats("demo");
       await API.getVersions("demo", "storyboards", "seg-1");
       await API.restoreVersion("demo", "storyboards", "seg-1", 3);
+      await API.getVersions("demo", "character_refs", "Hero/default/full_body");
+      await API.restoreVersion("demo", "character_refs", "Hero/default/full_body", 2);
 
       await API.listAssistantSessions("demo", "running");
       await API.getAssistantSession("demo", "session-1");
@@ -334,6 +336,13 @@ describe("API", () => {
         "/projects/demo/tasks?status=failed&task_type=image&source=agent&page=3&page_size=20",
       );
       expect(requestSpy).toHaveBeenCalledWith("/tasks/stats?project_name=demo");
+      expect(requestSpy).toHaveBeenCalledWith(
+        "/projects/demo/versions/character_refs/Hero/default/full_body",
+      );
+      expect(requestSpy).toHaveBeenCalledWith(
+        "/projects/demo/versions/character_refs/Hero/default/full_body/restore/2",
+        { method: "POST" },
+      );
       expect(requestSpy).toHaveBeenCalledWith(
         "/projects/demo/assistant/sessions?status=running",
       );

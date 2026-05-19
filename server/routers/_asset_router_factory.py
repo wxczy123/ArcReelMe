@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from lib.asset_types import ASSET_SPECS
+from lib.character_assets import DEFAULT_FORM_ID, ensure_character_forms, make_character_entry, set_ref_path
 from lib.i18n import Translator
 from lib.project_change_hints import project_change_source
 from lib.project_manager import ProjectManager
@@ -88,9 +89,13 @@ def build_asset_router(
 
             def _sync():
                 manager = pm_getter()
-                entry: dict[str, Any] = {"description": req.description, spec.sheet_field: ""}
-                for field in spec.extra_string_fields:
-                    entry[field] = extras.get(field, "")
+                source = {field: extras.get(field, "") for field in spec.extra_string_fields}
+                if hasattr(manager, "_build_asset_entry"):
+                    entry = manager._build_asset_entry(asset_type, req.description, source)
+                elif asset_type == "character":
+                    entry = make_character_entry(req.description, source)
+                else:
+                    entry = {"description": req.description, spec.sheet_field: source.get(spec.sheet_field, "")}
                 with project_change_source("webui"):
                     ok = manager._add_asset(asset_type, project_name, req.name, entry)
                 if not ok:
@@ -134,9 +139,23 @@ def build_asset_router(
                     if entry_name not in bucket:
                         raise KeyError(entry_name)
                     entry = bucket[entry_name]
-                    for field in update_fields:
-                        if req.get(field) is not None:
-                            entry[field] = req[field]
+                    if asset_type == "character" and isinstance(entry, dict):
+                        ensure_character_forms(entry)
+                        if req.get("description") is not None:
+                            entry["description"] = req["description"]
+                        if req.get("voice_style") is not None:
+                            entry["voice_style"] = req["voice_style"]
+                        if req.get(spec.sheet_field) is not None:
+                            set_ref_path(
+                                entry,
+                                entry.get("default_form") or DEFAULT_FORM_ID,
+                                "full_body",
+                                req[spec.sheet_field],
+                            )
+                    else:
+                        for field in update_fields:
+                            if req.get(field) is not None:
+                                entry[field] = req[field]
                     result.update(entry)
 
                 with project_change_source("webui"):

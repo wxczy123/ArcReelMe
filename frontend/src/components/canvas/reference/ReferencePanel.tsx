@@ -30,13 +30,27 @@ const PICKER_ID = "reference-panel-mention-picker";
 const refId = (r: ReferenceResource): string => `${r.type}:${r.name}`;
 const refNameFromId = (id: string): string => id.slice(id.indexOf(":") + 1);
 
-type BucketEntry = Partial<Record<"character_sheet" | "scene_sheet" | "prop_sheet", string>>;
+type BucketEntry = Partial<Record<"character_sheet" | "scene_sheet" | "prop_sheet", string>> & {
+  default_form?: string;
+  forms?: Record<string, {
+    storyboard_ref_slot?: "full_body" | "three_view";
+    refs?: Record<"full_body" | "three_view", { path?: string }>;
+  }>;
+};
 const sheetOf = (
   bucket: Record<string, unknown> | undefined,
   kind: AssetKind,
   name: string,
-): string | null =>
-  (bucket?.[name] as BucketEntry | undefined)?.[SHEET_FIELD[kind]] ?? null;
+): string | null => {
+  const entry = bucket?.[name] as BucketEntry | undefined;
+  if (!entry) return null;
+  if (kind === "character" && entry.forms) {
+    const form = entry.forms[entry.default_form || "default"] ?? Object.values(entry.forms)[0];
+    const slot = form?.storyboard_ref_slot || "full_body";
+    return form?.refs?.[slot]?.path || form?.refs?.full_body?.path || null;
+  }
+  return entry[SHEET_FIELD[kind]] ?? null;
+};
 
 export interface ReferencePanelProps {
   references: ReferenceResource[];

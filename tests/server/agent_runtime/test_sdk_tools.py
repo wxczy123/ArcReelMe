@@ -18,7 +18,9 @@ from server.agent_runtime.sdk_tools import build_arcreel_mcp_server
 from server.agent_runtime.sdk_tools._context import ToolContext
 from server.agent_runtime.sdk_tools.enqueue_assets import (
     generate_assets_tool,
+    generate_character_refs_tool,
     list_pending_assets_tool,
+    list_pending_character_refs_tool,
 )
 from server.agent_runtime.sdk_tools.enqueue_grid import generate_grid_tool
 from server.agent_runtime.sdk_tools.enqueue_storyboards import generate_storyboards_tool
@@ -44,7 +46,25 @@ class _FakePM:
         self._project_name = project_name
         self._project_dir = project_dir
         self.project_payload: dict[str, Any] = {
-            "characters": {"张三": {"description": "主角"}, "李四": {"description": ""}},
+            "characters": {
+                "张三": {
+                    "description": "主角",
+                    "voice_style": "",
+                    "default_form": "default",
+                    "forms": {
+                        "default": {
+                            "label": "默认造型",
+                            "description": "主角",
+                            "storyboard_ref_slot": "full_body",
+                            "input_refs": [],
+                            "refs": {
+                                "full_body": {"path": "", "purpose": "storyboard_reference"},
+                                "three_view": {"path": "", "purpose": "consistency_review"},
+                            },
+                        }
+                    },
+                }
+            },
             "scenes": {"村口": {"description": "黄昏的村口"}},
             "props": {},
             "style": "anime",
@@ -80,6 +100,14 @@ class _FakePM:
         return [
             {"name": "张三", "description": "主角描述"},
             {"name": "李四", "description": ""},
+        ]
+
+    def get_pending_character_refs(self, _name: str) -> list[dict[str, Any]]:
+        char = self.project_payload["characters"]["张三"]
+        form = char["forms"]["default"]
+        return [
+            {"name": "张三", "character": char, "form_id": "default", "form": form, "slot": "full_body"},
+            {"name": "张三", "character": char, "form_id": "default", "form": form, "slot": "three_view"},
         ]
 
     def get_pending_project_scenes(self, _name: str) -> list[dict[str, Any]]:
@@ -169,21 +197,56 @@ async def test_list_pending_assets_happy(fake_ctx: ToolContext) -> None:
     out = await _call(tool_obj, {})
     assert out.get("is_error") is not True
     text = out["content"][0]["text"]
-    assert "张三" in text
+    assert "张三" not in text
     assert "村口" in text
+
+
+async def test_list_pending_character_refs_happy(fake_ctx: ToolContext) -> None:
+    tool_obj = list_pending_character_refs_tool(fake_ctx)
+    out = await _call(tool_obj, {})
+    assert out.get("is_error") is not True
+    text = out["content"][0]["text"]
+    assert "张三/default" in text
+    assert "full_body" in text
 
 
 async def test_list_pending_assets_error(fake_ctx: ToolContext, monkeypatch) -> None:
     def boom(_name):
         raise RuntimeError("db down")
 
-    fake_ctx.pm.get_pending_characters = boom  # type: ignore[attr-defined]
+    fake_ctx.pm.get_pending_project_scenes = boom  # type: ignore[attr-defined]
     tool_obj = list_pending_assets_tool(fake_ctx)
-    out = await _call(tool_obj, {"type": "character"})
+    out = await _call(tool_obj, {"type": "scene"})
     assert out.get("is_error") is True
 
 
 async def test_generate_assets_happy(fake_ctx: ToolContext, monkeypatch) -> None:
+    from server.agent_runtime.sdk_tools import enqueue_assets as mod
+
+    async def fake_batch(*, project_name, specs, on_success=None, on_failure=None):
+        from lib.generation_queue_client import BatchTaskResult
+
+        succ = [
+            BatchTaskResult(
+                resource_id=s.resource_id,
+                task_id="t1",
+                status="succeeded",
+                result={"file_path": f"scenes/{s.resource_id}.png", "version": 1},
+            )
+            for s in specs
+        ]
+        return succ, []
+
+    monkeypatch.setattr(mod, "batch_enqueue_and_wait", fake_batch)
+    tool_obj = generate_assets_tool(fake_ctx)
+    out = await _call(tool_obj, {"type": "scene"})
+    assert out.get("is_error") is not True
+    text = out["content"][0]["text"]
+    assert "1 succeeded" in text
+    assert "村口" in text
+
+
+async def test_generate_character_refs_happy(fake_ctx: ToolContext, monkeypatch) -> None:
     from server.agent_runtime.sdk_tools import enqueue_assets as mod
 
     async def fake_batch(*, project_name, specs, on_success=None, on_failure=None):
@@ -201,17 +264,17 @@ async def test_generate_assets_happy(fake_ctx: ToolContext, monkeypatch) -> None
         return succ, []
 
     monkeypatch.setattr(mod, "batch_enqueue_and_wait", fake_batch)
-    tool_obj = generate_assets_tool(fake_ctx)
-    out = await _call(tool_obj, {"type": "character"})
+    tool_obj = generate_character_refs_tool(fake_ctx)
+    out = await _call(tool_obj, {"targets": [{"character": "张三", "form_id": "default", "slots": ["full_body"]}]})
     assert out.get("is_error") is not True
     text = out["content"][0]["text"]
     assert "1 succeeded" in text
-    assert "张三" in text
+    assert "张三/default/full_body" in text
 
 
 async def test_generate_assets_names_without_type(fake_ctx: ToolContext) -> None:
     tool_obj = generate_assets_tool(fake_ctx)
-    out = await _call(tool_obj, {"names": ["张三"]})
+    out = await _call(tool_obj, {"names": ["村口"]})
     assert out.get("is_error") is True
 
 

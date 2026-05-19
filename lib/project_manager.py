@@ -22,6 +22,17 @@ from pydantic import BaseModel, Field
 
 from lib.agent_profile import agent_profile_dir
 from lib.asset_types import ASSET_SPECS
+from lib.character_assets import (
+    CHARACTER_REF_SLOTS,
+    DEFAULT_FORM_ID,
+    ensure_character_forms,
+    get_storyboard_ref_path,
+    make_character_entry,
+    make_default_form,
+    set_ref_path,
+    validate_form_id,
+    validate_ref_slot,
+)
 from lib.json_io import atomic_write_json, load_json
 from lib.profile_manifest import (
     VALID_CONTENT_MODES,
@@ -691,6 +702,7 @@ class ProjectManager:
             "duration_seconds": duration_seconds,
             "segment_break": False,
             "characters_in_scene": [],
+            "character_forms": {},
             "scenes": [],
             "props": [],
             "visual": {
@@ -756,6 +768,7 @@ class ProjectManager:
             "scene_type": "剧情",
             "segment_break": False,
             "characters_in_scene": [],
+            "character_forms": {},
             "scenes": [],
             "props": [],
             "action": "",
@@ -1471,6 +1484,14 @@ class ProjectManager:
         self.update_project(project_name, _mutate)
         return self.load_project(project_name)
 
+    def _ensure_character_entry_forms(self, project: dict, name: str) -> dict:
+        bucket = project.get("characters")
+        if bucket is None or name not in bucket:
+            raise KeyError(f"角色 '{name}' 不存在")
+        entry = bucket[name]
+        ensure_character_forms(entry)
+        return entry
+
     def _get_asset(self, asset_type: str, project_name: str, name: str) -> dict:
         """获取资产定义。不存在抛 KeyError。"""
         spec = ASSET_SPECS[asset_type]
@@ -1523,38 +1544,170 @@ class ProjectManager:
         project = self.load_project(project_name)
 
         project["characters"][name] = {
-            "description": description,
-            "voice_style": voice_style or "",
-            "character_sheet": character_sheet or "",
+            **make_character_entry(description, {"voice_style": voice_style or ""}),
         }
+        if character_sheet:
+            set_ref_path(project["characters"][name], DEFAULT_FORM_ID, "full_body", character_sheet)
 
         self.save_project(project_name, project)
         return project
 
     def update_project_character_sheet(self, project_name: str, name: str, sheet_path: str) -> dict:
-        """更新项目级角色设计图路径"""
-        return self._update_asset_sheet("character", project_name, name, sheet_path)
+        """更新项目级角色默认形态全身图路径（旧接口保留给上传入口调用）。"""
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, name)
+            set_ref_path(entry, entry.get("default_form") or DEFAULT_FORM_ID, "full_body", sheet_path)
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
 
     def update_character_reference_image(self, project_name: str, char_name: str, ref_path: str) -> dict:
-        """
-        更新角色的参考图路径
+        """更新角色默认形态输入参考图（旧接口保留给上传入口调用）。"""
+        return self.add_character_input_ref(project_name, char_name, DEFAULT_FORM_ID, ref_path)
 
-        Args:
-            project_name: 项目名称
-            char_name: 角色名称
-            ref_path: 参考图相对路径
+    def add_character_form(
+        self,
+        project_name: str,
+        char_name: str,
+        form_id: str,
+        *,
+        label: str = "",
+        description: str = "",
+    ) -> dict:
+        """新增角色形态。已存在抛 ValueError。"""
+        form_id = validate_form_id(form_id)
 
-        Returns:
-            更新后的项目数据
-        """
-        project = self.load_project(project_name)
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            forms = entry.setdefault("forms", {})
+            if form_id in forms:
+                raise ValueError(f"角色形态已存在: {form_id}")
+            forms[form_id] = make_default_form(description, label=label or form_id)
 
-        if "characters" not in project or char_name not in project["characters"]:
-            raise KeyError(f"角色 '{char_name}' 不存在")
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
 
-        project["characters"][char_name]["reference_image"] = ref_path
-        self.save_project(project_name, project)
-        return project
+    def update_character_form(
+        self,
+        project_name: str,
+        char_name: str,
+        form_id: str,
+        *,
+        label: str | None = None,
+        description: str | None = None,
+        storyboard_ref_slot: str | None = None,
+    ) -> dict:
+        """更新角色形态元数据。"""
+        form_id = validate_form_id(form_id)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            if form_id not in entry["forms"]:
+                raise KeyError(form_id)
+            form = entry["forms"][form_id]
+            if label is not None:
+                form["label"] = label
+            if description is not None:
+                form["description"] = description
+            if storyboard_ref_slot is not None:
+                form["storyboard_ref_slot"] = validate_ref_slot(storyboard_ref_slot)
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
+
+    def delete_character_form(self, project_name: str, char_name: str, form_id: str) -> dict:
+        """删除角色形态。默认形态不可删。"""
+        form_id = validate_form_id(form_id)
+        self._assert_character_form_not_used(project_name, char_name, form_id)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            if form_id == entry.get("default_form"):
+                raise ValueError("不能删除默认形态")
+            if form_id not in entry["forms"]:
+                raise KeyError(form_id)
+            del entry["forms"][form_id]
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
+
+    def update_character_default_form(self, project_name: str, char_name: str, form_id: str) -> dict:
+        """更新角色默认形态。"""
+        form_id = validate_form_id(form_id)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            if form_id not in entry["forms"]:
+                raise KeyError(form_id)
+            entry["default_form"] = form_id
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
+
+    def _assert_character_form_not_used(self, project_name: str, char_name: str, form_id: str) -> None:
+        """删除形态前扫描 scripts，避免留下悬空引用。"""
+        for script_name in self.list_scripts(project_name):
+            try:
+                script = self.load_script(project_name, script_name)
+            except Exception:
+                continue
+            items = script.get("scenes") if isinstance(script.get("scenes"), list) else []
+            for item in items:
+                forms = item.get("character_forms")
+                if isinstance(forms, dict) and forms.get(char_name) == form_id:
+                    scene_id = item.get("scene_id") or "unknown"
+                    raise ValueError(f"角色形态已被剧本引用: {script_name}/{scene_id}")
+
+    def update_character_ref_path(
+        self,
+        project_name: str,
+        char_name: str,
+        form_id: str,
+        slot: str,
+        ref_path: str,
+    ) -> dict:
+        """更新角色某形态某槽位最终参考图路径。"""
+        form_id = validate_form_id(form_id)
+        slot = validate_ref_slot(slot)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            set_ref_path(entry, form_id, slot, ref_path)
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
+
+    def add_character_input_ref(self, project_name: str, char_name: str, form_id: str, ref_path: str) -> dict:
+        """追加角色某形态的生成输入参考图。"""
+        form_id = validate_form_id(form_id)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            if form_id not in entry["forms"]:
+                entry["forms"][form_id] = make_default_form(label=form_id)
+            refs = entry["forms"][form_id].setdefault("input_refs", [])
+            if ref_path not in refs:
+                refs.append(ref_path)
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
+
+    def remove_character_input_ref(self, project_name: str, char_name: str, form_id: str, ref_path: str) -> dict:
+        """删除角色某形态的生成输入参考图。"""
+        form_id = validate_form_id(form_id)
+
+        def _mutate(project):
+            entry = self._ensure_character_entry_forms(project, char_name)
+            forms = entry.setdefault("forms", {})
+            if form_id not in forms:
+                raise KeyError(form_id)
+            refs = forms[form_id].setdefault("input_refs", [])
+            if ref_path in refs:
+                refs.remove(ref_path)
+
+        self.update_project(project_name, _mutate)
+        return self.load_project(project_name)
 
     def get_project_character(self, project_name: str, name: str) -> dict:
         """获取项目级角色定义"""
@@ -1597,8 +1750,42 @@ class ProjectManager:
         return self._get_asset_path("prop", project_name, filename)
 
     def get_pending_characters(self, project_name: str) -> list[dict]:
-        """获取待生成设计图的角色列表（无 character_sheet 或文件不存在）"""
-        return self._get_pending_assets("character", project_name)
+        """获取待生成角色参考图的角色列表（任一形态槽位缺图即 pending）。"""
+        pending_refs = self.get_pending_character_refs(project_name)
+        names = []
+        seen = set()
+        for item in pending_refs:
+            name = item["name"]
+            if name not in seen:
+                seen.add(name)
+                names.append({"name": name, **item.get("character", {})})
+        return names
+
+    def get_pending_character_refs(self, project_name: str) -> list[dict]:
+        """获取缺 full_body / three_view 的角色形态槽位列表。"""
+        project = self.load_project(project_name)
+        project_dir = self.get_project_path(project_name)
+        pending: list[dict] = []
+        for name, entry in (project.get("characters") or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            ensure_character_forms(entry)
+            for form_id, form in entry.get("forms", {}).items():
+                refs = form.get("refs", {})
+                for slot in CHARACTER_REF_SLOTS:
+                    ref = refs.get(slot, {})
+                    rel_path = ref.get("path") if isinstance(ref, dict) else ""
+                    if not rel_path or not (project_dir / rel_path).exists():
+                        pending.append(
+                            {
+                                "name": name,
+                                "character": entry,
+                                "form_id": form_id,
+                                "form": form,
+                                "slot": slot,
+                            }
+                        )
+        return pending
 
     # ==================== 角色/场景/道具直接写入工具 ====================
 
@@ -1611,6 +1798,8 @@ class ProjectManager:
         """
         spec = ASSET_SPECS[asset_type]
         data = source or {}
+        if asset_type == "character":
+            return make_character_entry(description, data)
         entry: dict = {"description": description, spec.sheet_field: data.get(spec.sheet_field, "")}
         for field in spec.extra_string_fields:
             entry[field] = data.get(field, "")
@@ -1673,7 +1862,10 @@ class ProjectManager:
         # 角色参考图
         for char in scene.get("characters_in_scene", []):
             char_data = project["characters"].get(char, {})
-            sheet = char_data.get("character_sheet")
+            try:
+                _, _, sheet = get_storyboard_ref_path(char_data, scene.get("character_forms", {}).get(char))
+            except Exception:
+                sheet = ""
             if sheet:
                 sheet_path = project_dir / sheet
                 if sheet_path.exists():

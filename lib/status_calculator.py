@@ -8,6 +8,8 @@
 import logging
 from pathlib import Path
 
+from lib.character_assets import CHARACTER_REF_SLOTS, ensure_character_forms
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,7 +288,19 @@ class StatusCalculator:
         # 角色统计
         chars = project.get("characters", {})
         chars_total = len(chars)
-        chars_done = sum(1 for c in chars.values() if self._safe_exists(project_dir, c.get("character_sheet", "")))
+        chars_done = 0
+        for c in chars.values():
+            if not isinstance(c, dict):
+                continue
+            ensure_character_forms(c)
+            forms = c.get("forms", {})
+            if forms and all(
+                self._safe_exists(project_dir, form.get("refs", {}).get(slot, {}).get("path", ""))
+                for form in forms.values()
+                if isinstance(form, dict)
+                for slot in CHARACTER_REF_SLOTS
+            ):
+                chars_done += 1
 
         # 场景统计
         scenes = project.get("scenes", {})

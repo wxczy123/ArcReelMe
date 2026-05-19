@@ -150,6 +150,10 @@ class DramaScene(BaseModel):
     segment_break: bool = Field(default=False, description="是否为场景切换点")
     scene_type: str = Field(default="剧情", description="场景类型")
     characters_in_scene: list[str] = Field(description="出场角色名称列表")
+    character_forms: dict[str, str] = Field(
+        default_factory=dict,
+        description="每个出场角色使用的形态 ID，键必须来自 characters_in_scene，值必须来自 project.json 中该角色的 forms",
+    )
     scenes: list[str] = Field(default_factory=list, description="出场场景名称列表")
     props: list[str] = Field(default_factory=list, description="出场道具名称列表")
     image_prompt: ImagePrompt = Field(description="分镜图生成提示词")

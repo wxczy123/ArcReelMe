@@ -32,7 +32,7 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         sheet_field="character_sheet",
         subdir="characters",
         label_zh="角色",
-        extra_string_fields=("voice_style", "reference_image"),
+        extra_string_fields=("voice_style",),
     ),
     "scene": AssetSpec(
         asset_type="scene",

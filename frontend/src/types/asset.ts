@@ -7,6 +7,7 @@ export interface Asset {
   description: string;
   voice_style: string;
   image_path: string | null;
+  forms?: Record<string, import("./project").CharacterForm>;
   source_project: string | null;
   updated_at: string | null;
 }

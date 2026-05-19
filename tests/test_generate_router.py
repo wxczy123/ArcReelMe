@@ -215,9 +215,12 @@ class TestGenerateRouter:
             assert body["task_id"] == "task-1"
 
             call = fake_queue.calls[0]
-            assert call["task_type"] == "character"
+            assert call["task_type"] == "character_ref"
             assert call["media_type"] == "image"
-            assert call["resource_id"] == "Alice"
+            assert call["resource_id"] == "Alice/default/full_body"
+            assert call["payload"]["character"] == "Alice"
+            assert call["payload"]["form_id"] == "default"
+            assert call["payload"]["slot"] == "full_body"
 
     def test_scene_enqueue_success(self, tmp_path, monkeypatch):
         project_path = _prepare_files(tmp_path)

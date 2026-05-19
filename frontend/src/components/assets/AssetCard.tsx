@@ -21,7 +21,8 @@ export const AssetCard = memo(AssetCardImpl);
 function AssetCardImpl({ asset, onEdit, onDelete }: Props) {
   const { t, i18n } = useTranslation("assets");
   const Icon = TYPE_ICON[asset.type];
-  const imageUrl = API.getGlobalAssetUrl(asset.image_path, asset.updated_at);
+  const previewPath = resolveAssetPreviewPath(asset);
+  const imageUrl = API.getGlobalAssetUrl(previewPath, asset.updated_at);
   const formattedDate = asset.updated_at
     ? formatDate(asset.updated_at, i18n.language, SHORT_DATE_OPTS, "")
     : "";
@@ -76,4 +77,16 @@ function AssetCardImpl({ asset, onEdit, onDelete }: Props) {
       </div>
     </div>
   );
+}
+
+function resolveAssetPreviewPath(asset: Asset): string | null {
+  if (asset.type !== "character" || !asset.forms) {
+    return asset.image_path;
+  }
+  const defaultForm = asset.forms.default ?? Object.values(asset.forms)[0];
+  if (!defaultForm) {
+    return asset.image_path;
+  }
+  const slot = defaultForm.storyboard_ref_slot || "full_body";
+  return defaultForm.refs?.[slot]?.path || defaultForm.refs?.full_body?.path || asset.image_path;
 }

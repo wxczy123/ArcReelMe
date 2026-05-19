@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from lib.app_data_dir import app_data_dir
 from lib.asset_types import ASSET_SPECS
+from lib.character_assets import character_ref_resource_id, ensure_character_forms, validate_form_id, validate_ref_slot
 from lib.generation_queue import get_generation_queue
 from lib.i18n import Translator
 from lib.project_manager import ProjectManager
@@ -55,6 +56,10 @@ class GenerateVideoRequest(BaseModel):
 
 class GenerateCharacterRequest(BaseModel):
     prompt: str
+
+
+class GenerateCharacterRefRequest(BaseModel):
+    prompt: str | None = None
 
 
 class GenerateSceneRequest(BaseModel):
@@ -339,14 +344,78 @@ async def generate_character(
 ):
     """提交角色设计图生成任务到队列，立即返回 task_id。"""
     try:
-        return await _enqueue_asset_generation(
-            asset_type="character",
-            project_name=project_name,
-            resource_name=char_name,
-            prompt=req.prompt,
-            user_id=_user.id,
-            _t=_t,
+        return await generate_character_ref(
+            project_name,
+            char_name,
+            "default",
+            "full_body",
+            GenerateCharacterRefRequest(prompt=req.prompt),
+            _user,
+            _t,
         )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("请求处理失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_name}/generate/character-ref/{char_name}/{form_id}/{slot}")
+async def generate_character_ref(
+    project_name: str,
+    char_name: str,
+    form_id: str,
+    slot: str,
+    req: GenerateCharacterRefRequest,
+    _user: CurrentUser,
+    _t: Translator,
+):
+    """提交角色某形态某槽位参考图生成任务到队列。"""
+    try:
+        form_id = validate_form_id(form_id)
+        slot = validate_ref_slot(slot)
+
+        def _sync():
+            project = get_project_manager().load_project(project_name)
+            char_data = (project.get("characters") or {}).get(char_name)
+            if not isinstance(char_data, dict):
+                raise HTTPException(status_code=404, detail=_t("character_not_found", name=char_name))
+            ensure_character_forms(char_data)
+            forms = char_data.get("forms") if isinstance(char_data.get("forms"), dict) else {}
+            if form_id not in forms:
+                raise HTTPException(status_code=404, detail=f"角色形态不存在: {form_id}")
+            return _snapshot_image_backend(project_name)
+
+        image_snapshot = await asyncio.to_thread(_sync)
+        resource_id = character_ref_resource_id(char_name, form_id, slot)
+
+        queue = get_generation_queue()
+        result = await queue.enqueue_task(
+            project_name=project_name,
+            task_type="character_ref",
+            media_type="image",
+            resource_id=resource_id,
+            payload={
+                "character": char_name,
+                "form_id": form_id,
+                "slot": slot,
+                "prompt": req.prompt or "",
+                **image_snapshot,
+            },
+            source="webui",
+            user_id=_user.id,
+        )
+
+        slot_label = "全身图" if slot == "full_body" else "三视图"
+        return {
+            "success": True,
+            "task_id": result["task_id"],
+            "message": _t("character_task_submitted", name=f"{char_name}/{form_id}/{slot_label}"),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:

@@ -70,10 +70,28 @@ class TestComputeAssetFingerprints:
         assert "characters/refs/Hero.png" in result
         assert isinstance(result["characters/refs/Hero.png"], int)
 
+    def test_scans_nested_character_form_refs(self, tmp_path):
+        form_dir = tmp_path / "characters" / "Hero" / "default"
+        form_dir.mkdir(parents=True)
+        (form_dir / "full_body.png").write_bytes(b"full")
+        (form_dir / "three_view.png").write_bytes(b"three")
+
+        result = compute_asset_fingerprints(tmp_path)
+        assert "characters/Hero/default/full_body.png" in result
+        assert "characters/Hero/default/three_view.png" in result
+
     def test_ignores_versions_subdirectory(self, tmp_path):
         versions_dir = tmp_path / "storyboards" / "versions"
         versions_dir.mkdir(parents=True)
         (versions_dir / "v1.png").write_bytes(b"old")
+
+        result = compute_asset_fingerprints(tmp_path)
+        assert not any("versions" in k for k in result)
+
+    def test_ignores_nested_versions_subdirectory(self, tmp_path):
+        versions_dir = tmp_path / "characters" / "Hero" / "versions"
+        versions_dir.mkdir(parents=True)
+        (versions_dir / "full_body_v1.png").write_bytes(b"old")
 
         result = compute_asset_fingerprints(tmp_path)
         assert not any("versions" in k for k in result)

@@ -17,11 +17,9 @@ class TestCharacterPrompt:
         )
         assert "姜月茴" in prompt
         assert "黑发，冷静神态。" in prompt
-        # 四视图 16:9 布局（issue #353）
-        assert "16:9" in prompt
-        assert "四格" in prompt
-        assert "胸像特写" in prompt or "胸部以上" in prompt
-        assert "正面" in prompt and "侧面" in prompt and "背面" in prompt
+        assert "单人全身主参考图" in prompt
+        assert "从头到脚完整入画" in prompt
+        assert "不分格" in prompt
         # 风格前缀
         assert "古风" in prompt
         assert "Cinematic, low-key lighting" in prompt

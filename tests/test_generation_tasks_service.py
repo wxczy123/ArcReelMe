@@ -257,8 +257,8 @@ class TestGenerationTasks:
             "Alice",
             {"prompt": "角色描述"},
         )
-        assert character_result["resource_type"] == "characters"
-        assert fake_pm.project["characters"]["Alice"]["character_sheet"] == "characters/Alice.png"
+        assert character_result["resource_type"] == "character_refs"
+        assert fake_pm.project["characters"]["Alice"]["character_sheet"] == "characters/Alice/default/full_body.png"
 
         scene_result = await generation_tasks.execute_scene_task(
             "demo",
@@ -294,6 +294,66 @@ class TestGenerationTasks:
             await generation_tasks.execute_generation_task(
                 {"task_type": "unknown", "project_name": "demo", "resource_id": "x", "payload": {}}
             )
+
+    async def test_character_ref_reference_image_rules(self, tmp_path, monkeypatch):
+        project_path = _prepare_files(tmp_path)
+        (project_path / "characters" / "Alice" / "default" / "input_refs").mkdir(parents=True, exist_ok=True)
+        (project_path / "characters" / "Alice" / "default" / "full_body.png").write_bytes(b"png")
+        (project_path / "characters" / "Alice" / "default" / "input_refs" / "style.png").write_bytes(b"png")
+
+        fake_pm = _FakePM(project_path)
+        fake_pm.project["characters"]["Alice"] = {
+            "description": "年轻女性，黑色长发",
+            "default_form": "default",
+            "forms": {
+                "default": {
+                    "label": "默认造型",
+                    "description": "白色外套",
+                    "storyboard_ref_slot": "full_body",
+                    "input_refs": ["characters/Alice/default/input_refs/style.png"],
+                    "refs": {
+                        "full_body": {
+                            "path": "characters/Alice/default/full_body.png",
+                            "purpose": "storyboard_reference",
+                        },
+                        "three_view": {
+                            "path": "",
+                            "purpose": "consistency_review",
+                        },
+                    },
+                }
+            },
+        }
+        fake_generator = _FakeGenerator()
+
+        monkeypatch.setattr(generation_tasks, "get_project_manager", lambda: fake_pm)
+        monkeypatch.setattr(generation_tasks, "get_media_generator", _async_return(fake_generator))
+
+        await generation_tasks.execute_character_ref_task(
+            "demo",
+            "Alice/default/full_body",
+            {"character": "Alice", "form_id": "default", "slot": "full_body"},
+        )
+        assert fake_generator.image_calls[-1]["reference_images"] == [
+            project_path / "characters" / "Alice" / "default" / "input_refs" / "style.png"
+        ]
+
+        await generation_tasks.execute_character_ref_task(
+            "demo",
+            "Alice/default/three_view",
+            {"character": "Alice", "form_id": "default", "slot": "three_view"},
+        )
+        assert fake_generator.image_calls[-1]["reference_images"] == [
+            project_path / "characters" / "Alice" / "default" / "full_body.png"
+        ]
+
+        fake_pm.project["characters"]["Alice"]["forms"]["default"]["refs"]["full_body"]["path"] = ""
+        await generation_tasks.execute_character_ref_task(
+            "demo",
+            "Alice/default/three_view",
+            {"character": "Alice", "form_id": "default", "slot": "three_view"},
+        )
+        assert fake_generator.image_calls[-1]["reference_images"] == []
 
     async def test_execute_video_task_generates_thumbnail(self, monkeypatch, tmp_path):
         """视频生成后应自动提取首帧缩略图"""

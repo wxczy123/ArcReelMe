@@ -202,6 +202,7 @@ class TestDataValidator:
                         "scene_type": "剧情",
                         "duration_seconds": 8,
                         "characters_in_scene": ["姜月茴"],
+                        "character_forms": {"姜月茴": "default"},
                         "scenes": ["古宅"],
                         "props": ["玉佩"],
                         "image_prompt": "img",

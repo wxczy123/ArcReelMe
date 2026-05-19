@@ -48,6 +48,7 @@ class TestVersionManagerMore:
         restored = vm.restore_version("characters", "Alice", 1, current)
         assert restored["restored_version"] == 1
         assert restored["current_version"] == 1
+        assert current.read_bytes() == b"png-v1"
 
         info = vm.get_versions("characters", "Alice")
         assert info["current_version"] == 1
@@ -55,6 +56,24 @@ class TestVersionManagerMore:
 
         current.write_bytes(b"png-v3")
         assert vm.add_version("characters", "Alice", "p3", source_file=current) == 3
+
+    def test_restore_refreshes_current_file_mtime_for_cache_busting(self, tmp_path):
+        project = tmp_path / "demo"
+        vm = VersionManager(project)
+
+        current = project / "characters" / "Alice" / "default" / "full_body.png"
+        current.parent.mkdir(parents=True, exist_ok=True)
+        current.write_bytes(b"png-v1")
+        assert vm.add_version("character_refs", "Alice/default/full_body", "p1", source_file=current) == 1
+
+        current.write_bytes(b"png-v2")
+        before_restore_mtime_ns = current.stat().st_mtime_ns
+
+        restored = vm.restore_version("character_refs", "Alice/default/full_body", 1, current)
+
+        assert restored["current_version"] == 1
+        assert current.read_bytes() == b"png-v1"
+        assert current.stat().st_mtime_ns > before_restore_mtime_ns
 
     def test_restore_errors_and_missing_current(self, tmp_path):
         project = tmp_path / "demo"

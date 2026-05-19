@@ -6,8 +6,10 @@
 """
 
 import json
+import os
 import shutil
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,13 +31,23 @@ class VersionManager:
     """版本管理器"""
 
     # 支持的资源类型
-    RESOURCE_TYPES = ("storyboards", "videos", "characters", "scenes", "props", "grids", "reference_videos")
+    RESOURCE_TYPES = (
+        "storyboards",
+        "videos",
+        "characters",
+        "character_refs",
+        "scenes",
+        "props",
+        "grids",
+        "reference_videos",
+    )
 
     # 资源类型对应的文件扩展名
     EXTENSIONS = {
         "storyboards": ".png",
         "videos": ".mp4",
         "characters": ".png",
+        "character_refs": ".png",
         "scenes": ".png",
         "props": ".png",
         "grids": ".png",
@@ -83,6 +95,22 @@ class VersionManager:
     def _generate_iso_timestamp(self) -> str:
         """生成 ISO 格式时间戳（用于元数据）"""
         return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _build_version_rel_path(self, resource_type: str, resource_id: str, version: int, timestamp: str) -> str:
+        """构造版本文件相对路径。
+
+        character_refs 的 resource_id 形如 ``角色/form_id/slot``，版本文件需落在
+        ``versions/character_refs/角色/form_id/slot_vN_time.png``，不能把 slash 直接拼进文件名。
+        """
+        ext = self.EXTENSIONS.get(resource_type, ".png")
+        if resource_type == "character_refs":
+            parts = [p for p in resource_id.split("/") if p]
+            if len(parts) != 3:
+                raise ValueError(f"invalid character_refs resource_id: {resource_id!r}")
+            character, form_id, slot = parts
+            return f"versions/{resource_type}/{character}/{form_id}/{slot}_v{version}_{timestamp}{ext}"
+        version_filename = f"{resource_id}_v{version}_{timestamp}{ext}"
+        return f"versions/{resource_type}/{version_filename}"
 
     def get_versions(self, resource_type: str, resource_id: str) -> dict:
         """
@@ -169,10 +197,9 @@ class VersionManager:
 
             # 生成版本文件名和路径
             timestamp = self._generate_timestamp()
-            ext = self.EXTENSIONS.get(resource_type, ".png")
-            version_filename = f"{resource_id}_v{new_version}_{timestamp}{ext}"
-            version_rel_path = f"versions/{resource_type}/{version_filename}"
+            version_rel_path = self._build_version_rel_path(resource_type, resource_id, new_version, timestamp)
             version_abs_path = self.project_path / version_rel_path
+            version_abs_path.parent.mkdir(parents=True, exist_ok=True)
 
             # 如果有源文件，复制到版本目录
             if source_file and Path(source_file).exists():
@@ -296,8 +323,14 @@ class VersionManager:
             if not target_file.exists():
                 raise FileNotFoundError(f"版本文件不存在: {target_file}")
 
+            old_mtime_ns = current_file.stat().st_mtime_ns if current_file.exists() else 0
             current_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target_file, current_file)
+            shutil.copyfile(target_file, current_file)
+
+            # copy2 会保留版本文件的旧 mtime，而前端用当前文件 mtime_ns 作为缓存指纹。
+            # 还原后强制刷新 mtime，确保图片 URL 的 ?v= 会变化，避免浏览器继续显示旧版本。
+            refreshed_mtime_ns = max(time.time_ns(), old_mtime_ns + 1)
+            os.utime(current_file, ns=(refreshed_mtime_ns, refreshed_mtime_ns))
 
             resource_data["current_version"] = version
             self._save_versions(data)

@@ -15,10 +15,9 @@ import { PropsPage } from "./lorebook/PropsPage";
 import { ReferenceVideoCanvas } from "./reference/ReferenceVideoCanvas";
 import { GridImageToVideoCanvas } from "./grid/GridImageToVideoCanvas";
 import { API } from "@/api";
-import { buildEntityRevisionKey } from "@/utils/project-changes";
 import { getProviderModels, getCustomProviderModels, lookupSupportedDurations } from "@/utils/provider-models";
 import { effectiveMode } from "@/utils/generation-mode";
-import type { Scene, Prop, CustomProviderInfo, ProviderInfo } from "@/types";
+import type { Scene, Prop, CustomProviderInfo, ProviderInfo, CharacterRefSlot } from "@/types";
 import type { EpisodeScript } from "@/types/script";
 
 // ---------------------------------------------------------------------------
@@ -122,11 +121,11 @@ export function StudioCanvasRouter() {
 
   // 从任务队列派生 loading 状态（替代本地 state）
   const tasks = useTasksStore((s) => s.tasks);
-  const generatingCharacterNames = useMemo(() => {
+  const generatingCharacterRefKeys = useMemo(() => {
     const names = new Set<string>();
     for (const t of tasks) {
       if (
-        t.task_type === "character" &&
+        (t.task_type === "character_ref" || t.task_type === "character") &&
         t.project_name === currentProjectName &&
         (t.status === "queued" || t.status === "running")
       ) {
@@ -248,7 +247,6 @@ export function StudioCanvasRouter() {
     payload: {
       description: string;
       voiceStyle: string;
-      referenceFile?: File | null;
     },
   ) => {
     if (!currentProjectName) return;
@@ -258,32 +256,21 @@ export function StudioCanvasRouter() {
         voice_style: payload.voiceStyle,
       });
 
-      if (payload.referenceFile) {
-        await API.uploadFile(
-          currentProjectName,
-          "character_ref",
-          payload.referenceFile,
-          name,
-        );
-      }
-
-      await refreshProject(
-        payload.referenceFile
-          ? [buildEntityRevisionKey("character", name)]
-          : [],
-      );
+      await refreshProject();
       useAppStore.getState().pushToast(tRef.current("character_updated_toast", { name }), "success");
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("update_character_failed", { message: errMsg(err) }), "error");
     }
   }, [currentProjectName, refreshProject]);
 
-  const handleGenerateCharacter = useCallback(async (name: string) => {
+  const handleGenerateCharacterRef = useCallback(async (name: string, formId: string, slot: CharacterRefSlot) => {
     if (!currentProjectName) return;
     try {
-      await API.generateCharacter(
+      await API.generateCharacterRef(
         currentProjectName,
         name,
+        formId,
+        slot,
         currentProjectData?.characters?.[name]?.description ?? "",
       );
       useAppStore
@@ -304,19 +291,113 @@ export function StudioCanvasRouter() {
     try {
       await API.addCharacter(currentProjectName, name, description, voiceStyle);
 
+      let changedPath: string | null = null;
       if (referenceFile) {
-        await API.uploadFile(currentProjectName, "character_ref", referenceFile, name);
+        const res = await API.uploadCharacterInputRef(currentProjectName, name, "default", referenceFile);
+        changedPath = res.path;
       }
 
-      await refreshProject(
-        referenceFile
-          ? [buildEntityRevisionKey("character", name)]
-          : [],
-      );
+      await refreshProject(changedPath ? [changedPath] : []);
       useAppStore.getState().pushToast(tRef.current("character_added_toast", { name }), "success");
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("add_failed", { message: errMsg(err) }), "error");
       throw err; // AssetFormModal onSubmit 消费：失败时阻止 setAdding(false) 关闭对话框
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleAddCharacterForm = useCallback(async (
+    name: string,
+    formId: string,
+    label: string,
+    description: string,
+  ) => {
+    if (!currentProjectName) return;
+    try {
+      await API.addCharacterForm(currentProjectName, name, { form_id: formId, label, description });
+      await refreshProject();
+    } catch (err) {
+      useAppStore.getState().pushToast(tRef.current("add_failed", { message: errMsg(err) }), "error");
+      throw err;
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleUpdateCharacterForm = useCallback(async (
+    name: string,
+    formId: string,
+    updates: {
+      label?: string;
+      description?: string;
+      storyboard_ref_slot?: CharacterRefSlot;
+      default_form?: boolean;
+    },
+  ) => {
+    if (!currentProjectName) return;
+    try {
+      await API.updateCharacterForm(currentProjectName, name, formId, updates);
+      await refreshProject();
+    } catch (err) {
+      useAppStore.getState().pushToast(tRef.current("update_character_failed", { message: errMsg(err) }), "error");
+      throw err;
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleDeleteCharacterForm = useCallback(async (name: string, formId: string) => {
+    if (!currentProjectName) return;
+    try {
+      await API.deleteCharacterForm(currentProjectName, name, formId);
+      await refreshProject();
+    } catch (err) {
+      useAppStore.getState().pushToast(tRef.current("update_character_failed", { message: errMsg(err) }), "error");
+      throw err;
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleUploadCharacterFormRef = useCallback(async (
+    name: string,
+    formId: string,
+    slot: CharacterRefSlot,
+    file: File,
+  ) => {
+    if (!currentProjectName) return;
+    try {
+      const res = await API.uploadCharacterFormRef(currentProjectName, name, formId, slot, file);
+      await refreshProject([res.path]);
+      useAppStore.getState().pushToast(tRef.current("character_updated_toast", { name }), "success");
+    } catch (err) {
+      useAppStore.getState().pushToast(errMsg(err), "error");
+      throw err;
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleUploadCharacterInputRef = useCallback(async (
+    name: string,
+    formId: string,
+    file: File,
+  ) => {
+    if (!currentProjectName) return;
+    try {
+      const res = await API.uploadCharacterInputRef(currentProjectName, name, formId, file);
+      await refreshProject([res.path]);
+      useAppStore.getState().pushToast(tRef.current("character_updated_toast", { name }), "success");
+    } catch (err) {
+      useAppStore.getState().pushToast(errMsg(err), "error");
+      throw err;
+    }
+  }, [currentProjectName, refreshProject]);
+
+  const handleDeleteCharacterInputRef = useCallback(async (
+    name: string,
+    formId: string,
+    path: string,
+  ) => {
+    if (!currentProjectName) return;
+    try {
+      await API.deleteCharacterInputRef(currentProjectName, name, formId, path);
+      await refreshProject();
+      useAppStore.getState().pushToast(tRef.current("character_updated_toast", { name }), "success");
+    } catch (err) {
+      useAppStore.getState().pushToast(errMsg(err), "error");
+      throw err;
     }
   }, [currentProjectName, refreshProject]);
 
@@ -400,9 +481,9 @@ export function StudioCanvasRouter() {
     await refreshProject();
   }, [refreshProject]);
 
-  const handleGenerateCharacterVoid = useCallback((...args: Parameters<typeof handleGenerateCharacter>) => {
-    void handleGenerateCharacter(...args).catch(console.error);
-  }, [handleGenerateCharacter]);
+  const handleGenerateCharacterRefVoid = useCallback((...args: Parameters<typeof handleGenerateCharacterRef>) => {
+    void handleGenerateCharacterRef(...args).catch(console.error);
+  }, [handleGenerateCharacterRef]);
   const handleUpdateSceneVoid = useCallback((...args: Parameters<typeof handleUpdateScene>) => {
     void handleUpdateScene(...args).catch(console.error);
   }, [handleUpdateScene]);
@@ -450,11 +531,17 @@ export function StudioCanvasRouter() {
           projectName={currentProjectName}
           characters={currentProjectData?.characters ?? {}}
           onSaveCharacter={handleSaveCharacter}
-          onGenerateCharacter={handleGenerateCharacterVoid}
+          onGenerateCharacterRef={handleGenerateCharacterRefVoid}
           onAddCharacter={handleAddCharacterSubmit}
+          onAddCharacterForm={handleAddCharacterForm}
+          onUpdateCharacterForm={handleUpdateCharacterForm}
+          onDeleteCharacterForm={handleDeleteCharacterForm}
+          onUploadCharacterFormRef={handleUploadCharacterFormRef}
+          onUploadCharacterInputRef={handleUploadCharacterInputRef}
+          onDeleteCharacterInputRef={handleDeleteCharacterInputRef}
           onRestoreCharacterVersion={handleRestoreAsset}
           onRefreshProject={refreshProject}
-          generatingCharacterNames={generatingCharacterNames}
+          generatingCharacterRefKeys={generatingCharacterRefKeys}
         />
       </Route>
 

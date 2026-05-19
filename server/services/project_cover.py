@@ -17,7 +17,7 @@
        —— reference 模式核心兜底：即使一次视频都没生成，也能用一张场景设计图
           展现项目美术风格。scene > character 是因为环境/空间感更像"封面"。
 
-    4. 角色参考图 `character_sheet`
+    4. 角色默认形态的分镜参考图
        —— 最后兜底，仅剧情向项目才可能缺 scene 保留 character。
 
     5. None —— 前端渲染占位 FolderOpen 图标。
@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+
+from lib.character_assets import get_storyboard_ref_path
 
 if TYPE_CHECKING:
     from lib.project_manager import ProjectManager
@@ -105,7 +107,12 @@ def resolve_project_cover(
             return _url(sheet)
 
     for data in (project.get("characters") or {}).values():
-        sheet = (data or {}).get("character_sheet")
+        if not isinstance(data, dict):
+            continue
+        try:
+            _, _, sheet = get_storyboard_ref_path(data)
+        except Exception:
+            sheet = ""
         if sheet:
             return _url(sheet)
 

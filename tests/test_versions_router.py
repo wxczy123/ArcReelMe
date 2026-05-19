@@ -20,6 +20,9 @@ class _FakePM:
     def update_scene_asset(self, *args, **kwargs):
         self.updated.append(("storyboard", args, kwargs))
 
+    def update_character_ref_path(self, project_name, char_name, form_id, slot, file_path):
+        self.updated.append(("character_ref", project_name, char_name, form_id, slot, file_path))
+
 
 class _FakeVM:
     def __init__(self, project_path=None):
@@ -164,6 +167,29 @@ class TestVersionsRouter:
             assert "asset_fingerprints" in data
             assert "storyboards/scene_E1S01.png" in data["asset_fingerprints"]
             assert isinstance(data["asset_fingerprints"]["storyboards/scene_E1S01.png"], int)
+
+    def test_restore_character_ref_returns_nested_file_fingerprint(self, monkeypatch, tmp_path):
+        """角色形态槽位还原应返回新结构图片路径的 fingerprint。"""
+        fake_pm = _FakePM()
+        fake_pm.get_project_path = lambda name: tmp_path
+
+        current = tmp_path / "characters" / "Alice" / "default" / "full_body.png"
+        current.parent.mkdir(parents=True)
+        current.write_bytes(b"restored")
+
+        monkeypatch.setattr(versions, "get_project_manager", lambda: fake_pm)
+        monkeypatch.setattr(versions, "get_version_manager", lambda name: _FakeVM())
+
+        app = FastAPI()
+        app.dependency_overrides[get_current_user] = lambda: CurrentUserInfo(id="default", sub="testuser", role="admin")
+        app.include_router(versions.router, prefix="/api/v1")
+        with TestClient(app) as client:
+            resp = client.post("/api/v1/projects/demo/versions/character_refs/Alice/default/full_body/restore/1")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["file_path"] == "characters/Alice/default/full_body.png"
+            assert "characters/Alice/default/full_body.png" in data["asset_fingerprints"]
+            assert any(item[0] == "character_ref" for item in fake_pm.updated)
 
     def test_get_versions_unexpected_error_maps_to_500(self, monkeypatch):
         fake_pm = _FakePM()

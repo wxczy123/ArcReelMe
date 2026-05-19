@@ -8,6 +8,7 @@ MediaGenerator 中间层
 - storyboards: 分镜图 (scene_E1S01.png)
 - videos: 视频 (scene_E1S01.mp4)
 - characters: 角色设计图 (姜月茴.png)
+- character_refs: 角色形态参考图 (姜月茴/default/full_body.png)
 - scenes: 场景设计图 (庙宇.png)
 - props: 道具设计图 (玉佩.png)
 - grids: 宫格图 (grid_xxx.png)
@@ -44,6 +45,7 @@ class MediaGenerator:
         "storyboards": "storyboards/scene_{resource_id}.png",
         "videos": "videos/scene_{resource_id}.mp4",
         "characters": "characters/{resource_id}.png",
+        "character_refs": "characters/{resource_id}.png",
         "scenes": "scenes/{resource_id}.png",
         "props": "props/{resource_id}.png",
         "grids": "grids/{resource_id}.png",

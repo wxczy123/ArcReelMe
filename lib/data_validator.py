@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from lib.asset_types import ASSET_TYPES
+from lib.character_assets import CHARACTER_REF_SLOTS, DEFAULT_FORM_ID, ensure_character_forms
 from lib.json_io import load_json_or_none
 from lib.project_manager import effective_mode
 
@@ -83,6 +84,7 @@ class DataValidator:
             self.projects_root = app_data_dir()
         else:
             self.projects_root = Path(projects_root)
+        self._project_characters_cache: dict[str, Any] = {}
 
     @staticmethod
     def _is_hidden_path(path: Path) -> bool:
@@ -204,6 +206,29 @@ class DataValidator:
                     continue
                 if not char_data.get("description"):
                     errors.append(f"角色 '{char_name}' 缺少必填字段: description")
+                char_data = ensure_character_forms(dict(char_data))
+                forms = char_data.get("forms")
+                if not isinstance(forms, dict) or not forms:
+                    errors.append(f"角色 '{char_name}' 缺少 forms")
+                    continue
+                default_form = char_data.get("default_form") or DEFAULT_FORM_ID
+                if default_form not in forms:
+                    errors.append(f"角色 '{char_name}' default_form 不存在: {default_form}")
+                for form_id, form in forms.items():
+                    if not isinstance(form, dict):
+                        errors.append(f"角色 '{char_name}' 形态 '{form_id}' 数据格式错误，应为对象")
+                        continue
+                    slot = form.get("storyboard_ref_slot") or "full_body"
+                    if slot not in CHARACTER_REF_SLOTS:
+                        errors.append(f"角色 '{char_name}' 形态 '{form_id}' storyboard_ref_slot 无效: {slot}")
+                    refs = form.get("refs")
+                    if not isinstance(refs, dict):
+                        errors.append(f"角色 '{char_name}' 形态 '{form_id}' 缺少 refs")
+                        continue
+                    for ref_slot in CHARACTER_REF_SLOTS:
+                        ref = refs.get(ref_slot)
+                        if not isinstance(ref, dict):
+                            errors.append(f"角色 '{char_name}' 形态 '{form_id}' 缺少 refs.{ref_slot}")
 
         if project.get("clues") is not None:
             errors.append("project.json 含已废弃字段 clues，请等待自动迁移或手动重启服务")
@@ -445,6 +470,22 @@ class DataValidator:
                 invalid = set(chars_in_scene) - project_characters
                 if invalid:
                     errors.append(f"{prefix}: characters_in_scene 引用了不存在于 project.json 的角色: {invalid}")
+                character_forms = scene.get("character_forms")
+                if character_forms is None:
+                    errors.append(f"{prefix}: 缺少必填字段 character_forms")
+                elif not isinstance(character_forms, dict):
+                    errors.append(f"{prefix}: character_forms 必须是对象")
+                else:
+                    char_set = set(chars_in_scene)
+                    form_keys = set(character_forms.keys())
+                    if form_keys != char_set:
+                        errors.append(f"{prefix}: character_forms 的键必须与 characters_in_scene 一致")
+                    project_chars = self._project_characters_cache or {}
+                    for char_name, form_id in character_forms.items():
+                        char_data = project_chars.get(char_name)
+                        forms = char_data.get("forms", {}) if isinstance(char_data, dict) else {}
+                        if form_id not in forms:
+                            errors.append(f"{prefix}: 角色 '{char_name}' 引用了不存在的形态: {form_id}")
 
             scenes_in_scene = scene.get("scenes")
             if scenes_in_scene is None:
@@ -565,6 +606,11 @@ class DataValidator:
         warnings: list[str],
     ) -> None:
         project_characters = set(project.get("characters", {}).keys())
+        self._project_characters_cache = {}
+        if isinstance(project.get("characters"), dict):
+            for char_name, char_data in project["characters"].items():
+                if isinstance(char_data, dict):
+                    self._project_characters_cache[char_name] = ensure_character_forms(dict(char_data))
         project_scenes = set(project.get("scenes", {}).keys())
         project_props = set(project.get("props", {}).keys())
 
@@ -699,20 +745,34 @@ class DataValidator:
             for char_name, char_data in characters.items():
                 if not isinstance(char_data, dict):
                     continue
-                self._validate_local_reference(
-                    project_dir,
-                    char_data.get("character_sheet"),
-                    errors,
-                    f"characters[{char_name}].character_sheet",
-                    default_dir="characters",
-                )
-                self._validate_local_reference(
-                    project_dir,
-                    char_data.get("reference_image"),
-                    errors,
-                    f"characters[{char_name}].reference_image",
-                    default_dir="characters/refs",
-                )
+                char_data = ensure_character_forms(dict(char_data))
+                forms = char_data.get("forms") if isinstance(char_data.get("forms"), dict) else {}
+                for form_id, form in forms.items():
+                    if not isinstance(form, dict):
+                        continue
+                    refs = form.get("refs") if isinstance(form.get("refs"), dict) else {}
+                    for slot in CHARACTER_REF_SLOTS:
+                        ref = refs.get(slot)
+                        ref_path = ref.get("path") if isinstance(ref, dict) else None
+                        self._validate_local_reference(
+                            project_dir,
+                            ref_path,
+                            errors,
+                            f"characters[{char_name}].forms[{form_id}].refs[{slot}].path",
+                            default_dir=f"characters/{char_name}/{form_id}",
+                        )
+                    input_refs = form.get("input_refs") or []
+                    if not isinstance(input_refs, list):
+                        errors.append(f"characters[{char_name}].forms[{form_id}].input_refs 必须是数组")
+                        continue
+                    for ref_index, ref_path in enumerate(input_refs):
+                        self._validate_local_reference(
+                            project_dir,
+                            ref_path,
+                            errors,
+                            f"characters[{char_name}].forms[{form_id}].input_refs[{ref_index}]",
+                            default_dir=f"characters/{char_name}/{form_id}/input_refs",
+                        )
 
         scenes_dict = project.get("scenes", {})
         if isinstance(scenes_dict, dict):

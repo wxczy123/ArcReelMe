@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 logger = logging.getLogger(__name__)
 
 from lib.app_data_dir import app_data_dir
+from lib.character_assets import validate_form_id, validate_ref_slot
 from lib.i18n import Translator
 from lib.project_change_hints import project_change_source
 from lib.project_manager import ProjectManager
@@ -29,6 +30,7 @@ _RESOURCE_FILE_PATTERNS: dict[str, tuple[str, str]] = {
     "storyboards": ("storyboards", "scene_{id}.png"),
     "videos": ("videos", "scene_{id}.mp4"),
     "characters": ("characters", "{id}.png"),
+    "character_refs": ("characters", "{id}.png"),
     "scenes": ("scenes", "{id}.png"),
     "props": ("props", "{id}.png"),
 }
@@ -102,7 +104,18 @@ def _sync_metadata(
 ) -> None:
     """还原后同步元数据，确保引用指向统一文件路径。"""
     asset_type = _RESOURCE_TO_ASSET_TYPE.get(resource_type)
-    if asset_type is not None:
+    if resource_type == "character_refs":
+        parts = resource_id.split("/")
+        if len(parts) == 3:
+            char_name, form_id, slot = parts
+            try:
+                form_id = validate_form_id(form_id)
+                slot = validate_ref_slot(slot)
+                with project_change_source("webui"):
+                    get_project_manager().update_character_ref_path(project_name, char_name, form_id, slot, file_path)
+            except Exception:
+                pass
+    elif asset_type is not None:
         try:
             with project_change_source("webui"):
                 get_project_manager()._update_asset_sheet(asset_type, project_name, resource_id, file_path)
@@ -113,6 +126,27 @@ def _sync_metadata(
 
 
 # ==================== 版本查询 ====================
+
+
+@router.get("/projects/{project_name}/versions/character_refs/{resource_id:path}")
+async def get_character_ref_versions(
+    project_name: str,
+    resource_id: str,
+    _user: CurrentUser,
+):
+    """获取角色形态参考图版本列表，resource_id 形如 角色/form/slot。"""
+    try:
+
+        def _sync():
+            vm = get_version_manager(project_name)
+            versions_info = vm.get_versions("character_refs", resource_id)
+            return {"resource_type": "character_refs", "resource_id": resource_id, **versions_info}
+
+        return await asyncio.to_thread(_sync)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/projects/{project_name}/versions/{resource_type}/{resource_id}")
@@ -149,6 +183,18 @@ async def get_versions(
 
 
 # ==================== 版本还原 ====================
+
+
+@router.post("/projects/{project_name}/versions/character_refs/{resource_id:path}/restore/{version}")
+async def restore_character_ref_version(
+    project_name: str,
+    resource_id: str,
+    version: int,
+    _user: CurrentUser,
+    _t: Translator,
+):
+    """还原角色形态参考图版本，resource_id 形如 角色/form/slot。"""
+    return await restore_version(project_name, "character_refs", resource_id, version, _user, _t)
 
 
 @router.post("/projects/{project_name}/versions/{resource_type}/{resource_id}/restore/{version}")

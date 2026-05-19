@@ -19,7 +19,9 @@ from claude_agent_sdk import create_sdk_mcp_server
 from server.agent_runtime.sdk_tools._context import ToolContext
 from server.agent_runtime.sdk_tools.enqueue_assets import (
     generate_assets_tool,
+    generate_character_refs_tool,
     list_pending_assets_tool,
+    list_pending_character_refs_tool,
 )
 from server.agent_runtime.sdk_tools.enqueue_grid import generate_grid_tool
 from server.agent_runtime.sdk_tools.enqueue_storyboards import generate_storyboards_tool
@@ -47,6 +49,8 @@ __all__ = ["build_arcreel_mcp_server", "ToolContext", "ARCREEL_MCP_TOOL_IDS"]
 ARCREEL_MCP_TOOL_IDS: tuple[str, ...] = (
     "list_pending_assets",
     "generate_assets",
+    "list_pending_character_refs",
+    "generate_character_refs",
     "generate_storyboards",
     "generate_grid",
     "generate_video_episode",
@@ -68,6 +72,8 @@ def build_arcreel_mcp_server(*, project_name: str, projects_root: Path) -> Any:
         tools=[
             list_pending_assets_tool(ctx),
             generate_assets_tool(ctx),
+            list_pending_character_refs_tool(ctx),
+            generate_character_refs_tool(ctx),
             generate_storyboards_tool(ctx),
             generate_grid_tool(ctx),
             generate_video_episode_tool(ctx),

@@ -20,6 +20,7 @@ class AssetRepository(BaseRepository):
         description: str = "",
         voice_style: str = "",
         image_path: str | None = None,
+        forms_json: str = "{}",
         source_project: str | None = None,
     ) -> Asset:
         asset = Asset(
@@ -29,6 +30,7 @@ class AssetRepository(BaseRepository):
             description=description,
             voice_style=voice_style,
             image_path=image_path,
+            forms_json=forms_json,
             source_project=source_project,
         )
         self.session.add(asset)

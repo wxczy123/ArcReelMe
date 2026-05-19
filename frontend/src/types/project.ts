@@ -15,10 +15,28 @@ export interface ProjectOverview {
   generated_at?: string;
 }
 
+export type CharacterRefSlot = "full_body" | "three_view";
+
+export interface CharacterRef {
+  path: string;
+  purpose: string;
+}
+
+export interface CharacterForm {
+  label: string;
+  description: string;
+  storyboard_ref_slot: CharacterRefSlot;
+  input_refs: string[];
+  refs: Record<CharacterRefSlot, CharacterRef>;
+}
+
 export interface Character {
   description: string;
-  character_sheet?: string;
   voice_style?: string;
+  default_form?: string;
+  forms?: Record<string, CharacterForm>;
+  /** Legacy fields may appear in stale local data only. */
+  character_sheet?: string;
   reference_image?: string;
 }
 

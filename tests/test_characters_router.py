@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -41,6 +43,18 @@ class _FakePM:
         project = self.load_project(project_name)
         mutate_fn(project)
         self.save_project(project_name, project)
+
+    def get_project_path(self, project_name):
+        if project_name not in self.projects:
+            raise FileNotFoundError(project_name)
+        return Path("/tmp") / project_name
+
+    def remove_character_input_ref(self, project_name, char_name, form_id, ref_path):
+        project = self.load_project(project_name)
+        refs = project["characters"][char_name]["forms"][form_id]["input_refs"]
+        if ref_path in refs:
+            refs.remove(ref_path)
+        return project
 
 
 def _client(monkeypatch, fake_pm):
@@ -95,3 +109,33 @@ class TestCharactersRouter:
 
             missing_delete = client.delete("/api/v1/projects/demo/characters/Nope")
             assert missing_delete.status_code == 404
+
+    def test_delete_character_input_ref_updates_project_json(self, monkeypatch):
+        fake_pm = _FakePM()
+        fake_pm.projects["demo"]["characters"]["Alice"] = {
+            "description": "old",
+            "voice_style": "soft",
+            "default_form": "default",
+            "forms": {
+                "default": {
+                    "label": "默认造型",
+                    "description": "old",
+                    "storyboard_ref_slot": "full_body",
+                    "input_refs": ["characters/Alice/default/input_refs/style.png"],
+                    "refs": {
+                        "full_body": {"path": "", "purpose": "storyboard_reference"},
+                        "three_view": {"path": "", "purpose": "consistency_review"},
+                    },
+                }
+            },
+        }
+
+        with _client(monkeypatch, fake_pm) as client:
+            resp = client.request(
+                "DELETE",
+                "/api/v1/projects/demo/characters/Alice/forms/default/input-refs",
+                json={"path": "characters/Alice/default/input_refs/style.png"},
+            )
+
+            assert resp.status_code == 200
+            assert fake_pm.projects["demo"]["characters"]["Alice"]["forms"]["default"]["input_refs"] == []

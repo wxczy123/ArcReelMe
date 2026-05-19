@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from lib.asset_types import BUCKET_KEY, SHEET_KEY
+from lib.character_assets import get_storyboard_ref_path
 from lib.config.resolver import ConfigResolver
 from lib.db import async_session_factory
 from lib.db.base import DEFAULT_USER_ID
@@ -49,7 +50,13 @@ def _resolve_unit_references(
             continue
         bucket = project.get(BUCKET_KEY[rtype]) or {}
         item = bucket.get(rname)
-        sheet_rel = item.get(SHEET_KEY[rtype]) if isinstance(item, dict) else None
+        if rtype == "character" and isinstance(item, dict):
+            try:
+                _, _, sheet_rel = get_storyboard_ref_path(item)
+            except Exception:
+                sheet_rel = None
+        else:
+            sheet_rel = item.get(SHEET_KEY[rtype]) if isinstance(item, dict) else None
         if not sheet_rel:
             missing.append((rtype, rname))
             continue

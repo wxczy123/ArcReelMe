@@ -9,21 +9,46 @@ import { API } from "@/api";
 import { useAppStore } from "@/stores/app-store";
 import { useScrollTarget } from "@/hooks/useScrollTarget";
 import { errMsg } from "@/utils/async";
-import type { Character } from "@/types";
+import type { Character, CharacterRefSlot } from "@/types";
 import { GalleryEmptyState } from "./GalleryEmptyState";
 
 interface Props {
   projectName: string;
   characters: Record<string, Character>;
-  onSaveCharacter: (name: string, payload: { description: string; voiceStyle: string; referenceFile?: File | null }) => Promise<void>;
-  onGenerateCharacter: (name: string) => void;
+  onSaveCharacter: (name: string, payload: { description: string; voiceStyle: string }) => Promise<void>;
+  onGenerateCharacterRef: (name: string, formId: string, slot: CharacterRefSlot) => void;
   onAddCharacter: (name: string, description: string, voiceStyle: string, referenceFile?: File | null) => Promise<void>;
+  onAddCharacterForm: (name: string, formId: string, label: string, description: string) => Promise<void>;
+  onUpdateCharacterForm: (name: string, formId: string, updates: {
+    label?: string;
+    description?: string;
+    storyboard_ref_slot?: CharacterRefSlot;
+    default_form?: boolean;
+  }) => Promise<void>;
+  onDeleteCharacterForm: (name: string, formId: string) => Promise<void>;
+  onUploadCharacterFormRef: (name: string, formId: string, slot: CharacterRefSlot, file: File) => Promise<void>;
+  onUploadCharacterInputRef: (name: string, formId: string, file: File) => Promise<void>;
+  onDeleteCharacterInputRef: (name: string, formId: string, path: string) => Promise<void>;
   onRestoreCharacterVersion?: () => Promise<void> | void;
   onRefreshProject?: () => Promise<void> | void;
-  generatingCharacterNames?: Set<string>;
+  generatingCharacterRefKeys?: Set<string>;
 }
 
-export function CharactersPage({ projectName, characters, onSaveCharacter, onGenerateCharacter, onAddCharacter, onRestoreCharacterVersion, onRefreshProject, generatingCharacterNames }: Props) {
+export function CharactersPage({
+  projectName,
+  characters,
+  onSaveCharacter,
+  onGenerateCharacterRef,
+  onAddCharacter,
+  onAddCharacterForm,
+  onUpdateCharacterForm,
+  onDeleteCharacterForm,
+  onUploadCharacterFormRef,
+  onUploadCharacterInputRef,
+  onDeleteCharacterInputRef,
+  onRefreshProject,
+  generatingCharacterRefKeys,
+}: Props) {
   const { t } = useTranslation(["dashboard", "assets"]);
   const [adding, setAdding] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -69,10 +94,15 @@ export function CharactersPage({ projectName, characters, onSaveCharacter, onGen
             {entries.map(([name, char]) => (
               <CharacterCard key={name} name={name} character={char} projectName={projectName}
                 onSave={onSaveCharacter}
-                onGenerate={onGenerateCharacter}
-                onRestoreVersion={onRestoreCharacterVersion}
+                onGenerateRef={onGenerateCharacterRef}
+                onAddForm={onAddCharacterForm}
+                onUpdateForm={onUpdateCharacterForm}
+                onDeleteForm={onDeleteCharacterForm}
+                onUploadFormRef={onUploadCharacterFormRef}
+                onUploadInputRef={onUploadCharacterInputRef}
+                onDeleteInputRef={onDeleteCharacterInputRef}
                 onReload={onRefreshProject}
-                generating={generatingCharacterNames?.has(name)}
+                generatingRefKeys={generatingCharacterRefKeys}
               />
             ))}
           </div>

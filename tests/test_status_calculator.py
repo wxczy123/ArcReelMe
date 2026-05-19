@@ -201,16 +201,56 @@ class TestStatusCalculator:
     def test_calculate_project_status(self, tmp_path):
         project_root = tmp_path / "projects"
         project_path = project_root / "demo"
-        (project_path / "characters").mkdir(parents=True)
+        (project_path / "characters" / "A" / "default").mkdir(parents=True)
         (project_path / "scenes").mkdir(parents=True)
         (project_path / "props").mkdir(parents=True)
-        (project_path / "characters" / "A.png").write_bytes(b"ok")
+        (project_path / "characters" / "A" / "default" / "full_body.png").write_bytes(b"ok")
+        (project_path / "characters" / "A" / "default" / "three_view.png").write_bytes(b"ok")
         (project_path / "scenes" / "S1.png").write_bytes(b"ok")
         (project_path / "props" / "P1.png").write_bytes(b"ok")
 
         project = {
             "overview": {"synopsis": "test"},
-            "characters": {"A": {"character_sheet": "characters/A.png"}, "B": {"character_sheet": ""}},
+            "characters": {
+                "A": {
+                    "description": "A",
+                    "default_form": "default",
+                    "forms": {
+                        "default": {
+                            "label": "默认造型",
+                            "description": "A",
+                            "storyboard_ref_slot": "full_body",
+                            "input_refs": [],
+                            "refs": {
+                                "full_body": {
+                                    "path": "characters/A/default/full_body.png",
+                                    "purpose": "storyboard_reference",
+                                },
+                                "three_view": {
+                                    "path": "characters/A/default/three_view.png",
+                                    "purpose": "consistency_review",
+                                },
+                            },
+                        }
+                    },
+                },
+                "B": {
+                    "description": "B",
+                    "default_form": "default",
+                    "forms": {
+                        "default": {
+                            "label": "默认造型",
+                            "description": "B",
+                            "storyboard_ref_slot": "full_body",
+                            "input_refs": [],
+                            "refs": {
+                                "full_body": {"path": "", "purpose": "storyboard_reference"},
+                                "three_view": {"path": "", "purpose": "consistency_review"},
+                            },
+                        }
+                    },
+                },
+            },
             "scenes": {
                 "S1": {"scene_sheet": "scenes/S1.png"},
                 "S2": {"scene_sheet": ""},

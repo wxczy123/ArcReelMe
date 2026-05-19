@@ -45,14 +45,18 @@ vi.mock("./lorebook/CharacterCard", () => ({
   CharacterCard: ({
     name,
     onSave,
-    onGenerate,
+    onGenerateRef,
+    onUploadInputRef,
+    onDeleteInputRef,
   }: {
     name: string;
     onSave: (
       name: string,
-      payload: { description: string; voiceStyle: string; referenceFile?: File | null },
+      payload: { description: string; voiceStyle: string },
     ) => Promise<void>;
-    onGenerate: (name: string) => void;
+    onGenerateRef: (name: string, formId: string, slot: "full_body" | "three_view") => void;
+    onUploadInputRef: (name: string, formId: string, file: File) => Promise<void>;
+    onDeleteInputRef: (name: string, formId: string, path: string) => Promise<void>;
   }) => (
     <div data-testid="character-card" data-name={name}>
       <button
@@ -60,13 +64,22 @@ vi.mock("./lorebook/CharacterCard", () => ({
           void onSave(name, {
             description: "new desc",
             voiceStyle: "new voice",
-            referenceFile: new File(["ref"], "hero.png", { type: "image/png" }),
           })
         }
       >
         update-character
       </button>
-      <button onClick={() => onGenerate(name)}>generate-character</button>
+      <button
+        onClick={() => void onUploadInputRef(name, "default", new File(["ref"], "hero.png", { type: "image/png" }))}
+      >
+        upload-character-input-ref
+      </button>
+      <button
+        onClick={() => void onDeleteInputRef(name, "default", "characters/Hero/default/input_refs/style.png")}
+      >
+        delete-character-input-ref
+      </button>
+      <button onClick={() => onGenerateRef(name, "default", "full_body")}>generate-character</button>
     </div>
   ),
 }));
@@ -249,8 +262,9 @@ describe("StudioCanvasRouter", () => {
       scripts: { "episode_1.json": makeScript() },
     });
     vi.spyOn(API, "updateCharacter").mockResolvedValue({ success: true });
-    vi.spyOn(API, "uploadFile").mockResolvedValue({ success: true, path: "x", url: "y" });
-    vi.spyOn(API, "generateCharacter").mockResolvedValue({ success: true, task_id: "t-1", message: "已提交" });
+    vi.spyOn(API, "uploadCharacterInputRef").mockResolvedValue({ success: true, path: "x", url: "y" });
+    vi.spyOn(API, "deleteCharacterInputRef").mockResolvedValue({ success: true, path: "characters/Hero/default/input_refs/style.png" });
+    vi.spyOn(API, "generateCharacterRef").mockResolvedValue({ success: true, task_id: "t-1", message: "已提交" });
     vi.spyOn(API, "addCharacter").mockResolvedValue({ success: true });
 
     renderAt("/characters");
@@ -261,21 +275,36 @@ describe("StudioCanvasRouter", () => {
         description: "new desc",
         voice_style: "new voice",
       });
-      expect(API.uploadFile).toHaveBeenNthCalledWith(
-        1,
-        "demo",
-        "character_ref",
-        expect.any(File),
-        "Hero",
-      );
       expect(API.getProject).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByText("upload-character-input-ref"));
+    await waitFor(() => {
+      expect(API.uploadCharacterInputRef).toHaveBeenCalledWith(
+        "demo",
+        "Hero",
+        "default",
+        expect.any(File),
+      );
+    });
+
+    fireEvent.click(screen.getByText("delete-character-input-ref"));
+    await waitFor(() => {
+      expect(API.deleteCharacterInputRef).toHaveBeenCalledWith(
+        "demo",
+        "Hero",
+        "default",
+        "characters/Hero/default/input_refs/style.png",
+      );
     });
 
     fireEvent.click(screen.getByText("generate-character"));
     await waitFor(() => {
-      expect(API.generateCharacter).toHaveBeenCalledWith(
+      expect(API.generateCharacterRef).toHaveBeenCalledWith(
         "demo",
         "Hero",
+        "default",
+        "full_body",
         "hero description",
       );
       expect(useAppStore.getState().toast?.text).toContain("生成任务已提交");

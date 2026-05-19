@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from lib import PROJECT_ROOT
+from lib.character_assets import ensure_character_forms
 from lib.project_change_hints import (
     ProjectChangeBatch,
     ProjectChangeSource,
@@ -407,16 +408,17 @@ class ProjectEventService:
             "style_description": str(project.get("style_description") or ""),
         }
 
-        characters = {
-            name: {
+        characters = {}
+        for name, data in sorted(project.get("characters", {}).items()):
+            if not isinstance(data, dict):
+                continue
+            ensure_character_forms(data)
+            characters[name] = {
                 "description": str(data.get("description") or ""),
                 "voice_style": str(data.get("voice_style") or ""),
-                "character_sheet": str(data.get("character_sheet") or ""),
-                "reference_image": str(data.get("reference_image") or ""),
+                "default_form": str(data.get("default_form") or "default"),
+                "forms": data.get("forms") or {},
             }
-            for name, data in sorted(project.get("characters", {}).items())
-            if isinstance(data, dict)
-        }
 
         scenes = {
             name: {
@@ -506,6 +508,7 @@ class ProjectEventService:
                 "duration_seconds": item.get("duration_seconds"),
                 "segment_break": bool(item.get("segment_break")),
                 "characters": sorted(str(name) for name in item.get(chars_field, []) or []),
+                "character_forms": item.get("character_forms") if isinstance(item.get("character_forms"), dict) else {},
                 "scenes": sorted(str(name) for name in item.get("scenes", []) or []),
                 "props": sorted(str(name) for name in item.get("props", []) or []),
                 "image_prompt": item.get("image_prompt"),

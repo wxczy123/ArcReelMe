@@ -143,4 +143,38 @@ describe("VersionTimeMachine", () => {
     expect(previewImage).toHaveClass("object-contain");
     expect(previewImage.parentElement).toHaveClass("h-80");
   });
+
+  it("supports character ref version resources with form and slot id", async () => {
+    vi.spyOn(API, "getVersions").mockResolvedValue({
+      resource_type: "character_refs",
+      resource_id: "Hero/default/full_body",
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          filename: "full_body_v1.png",
+          created_at: "2026-02-01T00:00:00Z",
+          file_size: 10,
+          is_current: true,
+          file_url: "/api/v1/files/demo/versions/character_refs/Hero/default/full_body_v1.png",
+        },
+      ],
+    });
+
+    render(
+      <VersionTimeMachine
+        projectName="demo"
+        resourceType="character_refs"
+        resourceId="Hero/default/full_body"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /版本/ }));
+    expect(await screen.findByRole("button", { name: "v1" })).toBeInTheDocument();
+    expect(API.getVersions).toHaveBeenCalledWith(
+      "demo",
+      "character_refs",
+      "Hero/default/full_body",
+    );
+  });
 });

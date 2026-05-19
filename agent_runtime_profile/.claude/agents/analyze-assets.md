@@ -39,13 +39,16 @@ description: 从剧本中提取角色 / 场景 / 道具三类资产定义，按 
 
 **角色提取规则**：
 - 识别在小说中有实质出场的角色
-- description 字段只包含**视觉描述**：
+- 顶层 description 字段只写**跨形态稳定外貌**：
   - 外貌要点（五官、身材、标志性特征）
-  - 服装（款式、颜色、材质）
-  - 标志物（配饰、武器、道具）
+  - 跨造型不变的标志物（痣、疤、瞳色、发色等）
   - 色彩关键词（主色调、辅助色）
   - 参考风格（视觉风格标签）
 - voice_style 字段记录声音/语气风格（如"温柔但有威严"）
+- 必须输出 default_form 与 forms：
+  - `default` 是最常见造型，通常为常规服装和状态
+  - 特殊形态只提取视觉差异明显且会进入分镜的状态，如病弱、礼服、回忆时期、战斗形态
+  - 每个 form 写 label、description、storyboard_ref_slot=`full_body`、input_refs=[]、refs.full_body/three_view 空路径
 - **不包含**：性格描述、角色关系、剧情背景
 
 **场景提取规则**：
@@ -61,7 +64,7 @@ description: 从剧本中提取角色 / 场景 / 道具三类资产定义，按 
 ⚠️ 必须单行，JSON 使用紧凑格式，不可用 `\` 换行：
 
 ```bash
-python .claude/skills/manage-project/scripts/add_assets.py --characters '{"角色名1": {"description": "视觉描述...", "voice_style": "声音风格..."}, "角色名2": {"description": "视觉描述...", "voice_style": "声音风格..."}}' --scenes '{"庙宇": {"description": "空间描述..."}, "客栈大堂": {"description": "环境描述..."}}' --props '{"玉佩": {"description": "外观描述..."}, "长剑": {"description": "外观描述..."}}'
+python .claude/skills/manage-project/scripts/add_assets.py --characters '{"角色名1":{"description":"跨形态稳定外貌...","voice_style":"声音风格...","default_form":"default","forms":{"default":{"label":"默认造型","description":"常规服装和状态...","storyboard_ref_slot":"full_body","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}},"hotel_sick":{"label":"病弱形态","description":"脸色苍白、病号服或虚弱状态...","storyboard_ref_slot":"full_body","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}}}}}' --scenes '{"庙宇": {"description": "空间描述..."}, "客栈大堂": {"description": "环境描述..."}}' --props '{"玉佩": {"description": "外观描述..."}, "长剑": {"description": "外观描述..."}}'
 ```
 
 - 已存在的角色/场景/道具会自动跳过（不覆盖已有数据）

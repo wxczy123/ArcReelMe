@@ -799,6 +799,7 @@ async def update_scene(name: str, scene_id: str, req: UpdateSceneRequest, _user:
                             "image_prompt",
                             "video_prompt",
                             "characters_in_scene",
+                            "character_forms",
                             "scenes",
                             "props",
                             "segment_break",

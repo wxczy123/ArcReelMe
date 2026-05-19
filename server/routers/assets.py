@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import uuid
@@ -14,6 +15,14 @@ from sqlalchemy.exc import IntegrityError
 
 from lib.app_data_dir import app_data_dir
 from lib.asset_types import ASSET_TYPES, BUCKET_KEY, SHEET_KEY
+from lib.character_assets import (
+    CHARACTER_REF_SLOTS,
+    DEFAULT_FORM_ID,
+    collect_existing_paths_from_forms,
+    ensure_character_forms,
+    get_storyboard_ref_path,
+    make_character_entry,
+)
 from lib.db import async_session_factory
 from lib.db.repositories.asset_repo import AssetRepository
 from lib.i18n import Translator
@@ -47,6 +56,13 @@ def _validate_asset_name(name: str, _t: Translator) -> str:
 
 
 def _serialize(asset) -> dict:
+    forms: dict = {}
+    if asset.type == "character" and asset.forms_json:
+        try:
+            parsed = json.loads(asset.forms_json)
+            forms = parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            forms = {}
     return {
         "id": asset.id,
         "type": asset.type,
@@ -54,6 +70,7 @@ def _serialize(asset) -> dict:
         "description": asset.description,
         "voice_style": asset.voice_style,
         "image_path": asset.image_path,
+        "forms": forms,
         "source_project": asset.source_project,
         "updated_at": asset.updated_at.isoformat() if asset.updated_at else None,
     }
@@ -85,6 +102,110 @@ def _delete_global_asset_file(rel_path: str) -> None:
         return
     except OSError:
         logger.warning("delete global asset file failed: %s", rel_path)
+
+
+def _safe_copy_project_file_to_global(
+    project_dir: Path, rel_path: str, asset_type: str, bundle: str, suffix: str
+) -> str | None:
+    if not rel_path:
+        return None
+    try:
+        ProjectManager._safe_subpath(project_dir, rel_path)
+    except ValueError:
+        return None
+    src = project_dir / rel_path
+    if not src.exists() or not src.is_file():
+        return None
+    ext = src.suffix.lower() or ".png"
+    target_rel = f"_global_assets/{asset_type}/{bundle}/{suffix}{ext}"
+    target = get_project_manager().projects_root / target_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, target)
+    return target_rel
+
+
+def _copy_character_forms_to_global(
+    project_dir: Path,
+    forms: dict,
+    bundle: str,
+    default_form: str = DEFAULT_FORM_ID,
+) -> tuple[dict, str | None]:
+    forms_global = json.loads(json.dumps(forms, ensure_ascii=False))
+    preview_path: str | None = None
+    for form_id, form in forms_global.items():
+        if not isinstance(form, dict):
+            continue
+        refs = form.get("refs") if isinstance(form.get("refs"), dict) else {}
+        for slot in CHARACTER_REF_SLOTS:
+            ref = refs.get(slot)
+            if not isinstance(ref, dict):
+                continue
+            copied = _safe_copy_project_file_to_global(
+                project_dir,
+                str(ref.get("path") or ""),
+                "character",
+                bundle,
+                f"{form_id}/{slot}",
+            )
+            ref["path"] = copied or ""
+        copied_inputs: list[str] = []
+        for idx, rel_path in enumerate(form.get("input_refs") or []):
+            copied = _safe_copy_project_file_to_global(
+                project_dir,
+                str(rel_path),
+                "character",
+                bundle,
+                f"{form_id}/input_refs/{idx}_{Path(str(rel_path)).stem}",
+            )
+            if copied:
+                copied_inputs.append(copied)
+        form["input_refs"] = copied_inputs
+
+    try:
+        default_entry = {"default_form": default_form, "forms": forms_global}
+        _, _, preview_path = get_storyboard_ref_path(default_entry)
+        preview_path = preview_path or None
+    except Exception:
+        for path in collect_existing_paths_from_forms(forms_global):
+            preview_path = path
+            break
+    return forms_global, preview_path
+
+
+def _copy_global_character_forms_to_project(project_dir: Path, forms: dict, desired_name: str) -> dict:
+    forms_project = json.loads(json.dumps(forms, ensure_ascii=False))
+    for form_id, form in forms_project.items():
+        if not isinstance(form, dict):
+            continue
+        refs = form.get("refs") if isinstance(form.get("refs"), dict) else {}
+        for slot in CHARACTER_REF_SLOTS:
+            ref = refs.get(slot)
+            if not isinstance(ref, dict):
+                continue
+            src_rel = str(ref.get("path") or "")
+            src = get_project_manager().projects_root / src_rel
+            if not src_rel or not src.exists() or not src.is_file():
+                ref["path"] = ""
+                continue
+            ext = src.suffix.lower() or ".png"
+            dst_rel = f"characters/{desired_name}/{form_id}/{slot}{ext}"
+            dst = project_dir / dst_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            ref["path"] = dst_rel
+        copied_inputs: list[str] = []
+        for idx, src_rel in enumerate(form.get("input_refs") or []):
+            src = get_project_manager().projects_root / str(src_rel)
+            if not src.exists() or not src.is_file():
+                continue
+            ext = src.suffix.lower() or ".png"
+            dst_rel = f"characters/{desired_name}/{form_id}/input_refs/{idx}_{src.stem}{ext}"
+            dst = project_dir / dst_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            copied_inputs.append(dst_rel)
+        form["input_refs"] = copied_inputs
+    return forms_project
 
 
 @router.get("")
@@ -126,8 +247,13 @@ async def create_asset(
 
     # 1) 先落盘再 create；IntegrityError 路径负责清理 orphan
     image_path: str | None = None
+    forms_json = "{}"
     if image is not None and image.filename:
         image_path = await _save_upload(image, type, _t)
+        if type == "character":
+            entry = make_character_entry(description, {"voice_style": voice_style})
+            entry["forms"][DEFAULT_FORM_ID]["refs"]["full_body"]["path"] = image_path
+            forms_json = json.dumps(entry["forms"], ensure_ascii=False)
 
     # 2) 真正 create；任何失败路径都必须清理已落盘文件，保证 DB/磁盘一致
     try:
@@ -140,6 +266,7 @@ async def create_asset(
                     description=description,
                     voice_style=voice_style,
                     image_path=image_path,
+                    forms_json=forms_json,
                     source_project=None,
                 )
                 await s.commit()
@@ -203,6 +330,14 @@ async def delete_asset(asset_id: str, _user: CurrentUser, _t: Translator):
         if a:
             if a.image_path:
                 _delete_global_asset_file(a.image_path)
+            if a.type == "character" and a.forms_json:
+                try:
+                    forms = json.loads(a.forms_json)
+                    if isinstance(forms, dict):
+                        for rel_path in collect_existing_paths_from_forms(forms):
+                            _delete_global_asset_file(rel_path)
+                except json.JSONDecodeError:
+                    pass
             await repo.delete(asset_id)
             await s.commit()
     return None
@@ -227,11 +362,25 @@ async def replace_image(
     # 2) 先保存新图（会触发 415/413 校验）—— 旧文件仍完好
     new_path = await _save_upload(image, asset_type, _t)
 
+    forms_json_patch: dict[str, str] = {}
+    if asset_type == "character":
+        try:
+            forms = json.loads(a.forms_json or "{}")
+            if not isinstance(forms, dict) or not forms:
+                forms = make_character_entry(a.description or "", {"voice_style": a.voice_style or ""})["forms"]
+        except json.JSONDecodeError:
+            forms = make_character_entry(a.description or "", {"voice_style": a.voice_style or ""})["forms"]
+        forms.setdefault(DEFAULT_FORM_ID, make_character_entry("", {})["forms"][DEFAULT_FORM_ID])
+        forms[DEFAULT_FORM_ID].setdefault("refs", {})
+        forms[DEFAULT_FORM_ID]["refs"].setdefault("full_body", {"purpose": "storyboard_reference"})
+        forms[DEFAULT_FORM_ID]["refs"]["full_body"]["path"] = new_path
+        forms_json_patch["forms_json"] = json.dumps(forms, ensure_ascii=False)
+
     # 3) 更新 DB；若写入失败则清理已落盘的新文件（旧文件保留）
     try:
         async with async_session_factory() as s:
             repo = AssetRepository(s)
-            a = await repo.update(asset_id, image_path=new_path)
+            a = await repo.update(asset_id, image_path=new_path, **forms_json_patch)
             await s.commit()
             await s.refresh(a)
     except Exception:
@@ -293,12 +442,15 @@ async def from_project(
     asset_name = _validate_asset_name(req.override_name or req.resource_id, _t)
     description = resource.get("description") or ""
     voice_style = resource.get("voice_style", "") if req.resource_type == "character" else ""
+    project_dir = get_project_manager().get_project_path(req.project_name)
+
+    if req.resource_type == "character" and isinstance(resource, dict):
+        ensure_character_forms(resource)
 
     sheet_rel = resource.get(SHEET_KEY[req.resource_type]) or ""
     source_sheet_path: Path | None = None
-    if sheet_rel:
+    if req.resource_type != "character" and sheet_rel:
         try:
-            project_dir = get_project_manager().get_project_path(req.project_name)
             ProjectManager._safe_subpath(project_dir, sheet_rel)
             candidate = project_dir / sheet_rel
             if candidate.exists() and candidate.is_file():
@@ -321,9 +473,20 @@ async def from_project(
             },
         )
 
-    # 5) 拷贝源 sheet 到 _global_assets/{type}/{uuid}.{ext}
+    # 5) 拷贝源 sheet / character forms 到 _global_assets/{type}/...
     new_image_path: str | None = None
-    if source_sheet_path is not None:
+    forms_json = "{}"
+    if req.resource_type == "character":
+        bundle = uuid.uuid4().hex
+        forms_global, preview = _copy_character_forms_to_global(
+            project_dir,
+            resource.get("forms") or {},
+            bundle,
+            resource.get("default_form") or DEFAULT_FORM_ID,
+        )
+        forms_json = json.dumps(forms_global, ensure_ascii=False)
+        new_image_path = preview
+    elif source_sheet_path is not None:
         ext = source_sheet_path.suffix.lower() or ".png"
         root = get_project_manager().get_global_assets_root() / req.resource_type
         uid = uuid.uuid4().hex
@@ -345,6 +508,7 @@ async def from_project(
                     description=description,
                     voice_style=voice_style,
                     image_path=new_image_path,
+                    forms_json=forms_json,
                     source_project=req.project_name,
                 )
                 await s.commit()
@@ -359,6 +523,7 @@ async def from_project(
                         description=description,
                         voice_style=voice_style,
                         image_path=new_image_path,
+                        forms_json=forms_json,
                         source_project=req.project_name,
                     )
                     await s.commit()
@@ -455,7 +620,19 @@ async def apply_to_project(
         target_sheet: str | None = None
         copy_src: Path | None = None
         copy_dst: Path | None = None
-        if a.image_path:
+        character_forms: dict | None = None
+        if a.type == "character":
+            try:
+                parsed = json.loads(a.forms_json or "{}")
+                character_forms = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                character_forms = {}
+            if not character_forms and a.image_path:
+                character_forms = make_character_entry(a.description or "", {"voice_style": a.voice_style or ""})[
+                    "forms"
+                ]
+                character_forms[DEFAULT_FORM_ID]["refs"]["full_body"]["path"] = a.image_path
+        elif a.image_path:
             src = project_manager.projects_root / a.image_path
             if src.exists() and src.is_file():
                 ext = src.suffix.lower() or ".png"
@@ -487,12 +664,20 @@ async def apply_to_project(
                 "target_sheet": target_sheet,
                 "copy_src": copy_src,
                 "copy_dst": copy_dst,
+                "character_forms": character_forms,
             }
         )
 
     # 5) 执行文件拷贝（off event loop）
     def _copy_all() -> None:
         for plan in plans:
+            if plan["asset"].type == "character" and plan.get("character_forms") is not None:
+                plan["character_forms"] = _copy_global_character_forms_to_project(
+                    project_dir,
+                    plan["character_forms"] or {},
+                    plan["desired_name"],
+                )
+                continue
             src = plan["copy_src"]
             dst = plan["copy_dst"]
             if src is None or dst is None:
@@ -511,7 +696,17 @@ async def apply_to_project(
             sk = plan["sheet_key"]
             name_ = plan["desired_name"]
             ts = plan["target_sheet"]
-            payload: dict = {"description": a_.description or ""}
+            if a_.type == "character":
+                payload = make_character_entry(
+                    a_.description or "",
+                    {
+                        "voice_style": a_.voice_style or "",
+                        "default_form": DEFAULT_FORM_ID,
+                        "forms": plan.get("character_forms") or {},
+                    },
+                )
+            else:
+                payload = {"description": a_.description or ""}
             if a_.type == "character":
                 payload["voice_style"] = a_.voice_style or ""
             if ts:
