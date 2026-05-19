@@ -8,46 +8,53 @@ from lib.prompt_builders import (
 
 
 class TestCharacterPrompt:
-    def test_includes_name_description_and_quad_layout(self):
+    def test_includes_name_description_and_full_body_layout(self):
         prompt = build_character_prompt(
             "姜月茴",
             "黑发，冷静神态。",
-            style="古风",
+            style="画风：古风",
             style_description="Cinematic, low-key lighting",
         )
         assert "姜月茴" in prompt
         assert "黑发，冷静神态。" in prompt
-        assert "单人全身主参考图" in prompt
+        assert "单人全身参考图" in prompt
         assert "从头到脚完整入画" in prompt
-        assert "不分格" in prompt
+        assert "纯白色背景" in prompt
+        assert "不要文字" in prompt
         # 风格前缀
-        assert "古风" in prompt
+        assert "画风：古风" in prompt
+        assert "风格：画风" not in prompt
         assert "Cinematic, low-key lighting" in prompt
-        # 反向提示尾部
-        assert "画面避免" in prompt
 
     def test_no_negative_prompt_field_returned(self):
-        # build_character_prompt 仅返回字符串；反向提示已 inline 到末尾
+        # build_character_prompt 仅返回字符串；资产图不再拼泛化负向尾巴
         prompt = build_character_prompt("张三", "短发青年")
         assert isinstance(prompt, str)
-        assert "画面避免" in prompt
-        assert "水印" in prompt
+        assert "画面避免" not in prompt
+        assert "水印" not in prompt
+        assert "跨形态稳定外貌" not in prompt
+        assert "当前形态" not in prompt
 
 
 class TestScenePromptAndPropPrompt:
     def test_prop_three_views(self):
-        prompt = build_prop_prompt("玉佩", "古朴温润")
+        prompt = build_prop_prompt("玉佩", "古朴温润", style="画风：写实")
         assert "玉佩" in prompt
         assert "古朴温润" in prompt
         assert "三视图" in prompt or "三个视图" in prompt
-        assert "画面避免" in prompt
+        assert "画风：写实" in prompt
+        assert "风格：画风" not in prompt
+        assert "画面避免" not in prompt
 
-    def test_scene_main_detail_layout(self):
-        prompt = build_scene_prompt("祠堂", "昏暗古朴")
+    def test_scene_prompt_is_single_scene_description(self):
+        prompt = build_scene_prompt("祠堂", "昏暗古朴", style="画风：写实")
         assert "祠堂" in prompt
         assert "昏暗古朴" in prompt
-        assert "主画面" in prompt
-        assert "画面避免" in prompt
+        assert "画风：写实" in prompt
+        assert "风格：画风" not in prompt
+        assert "主画面" not in prompt
+        assert "右下角" not in prompt
+        assert "画面避免" not in prompt
 
 
 class TestStoryboardSuffix:
