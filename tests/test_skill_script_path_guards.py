@@ -1,9 +1,10 @@
-"""固化 agent_runtime_profile/.claude/skills 下 4 个脚本的 cwd 路径围栏契约。
+"""固化 agent_runtime_profile/.claude/skills 下脚本的 cwd 路径围栏契约。
 
 约束：
 - cwd 必须含 project.json，否则脚本拒绝执行
 - split_episode / peek_split_point：source 必须在 cwd/source/ 内
 - split_episode：output 不跟随 source.parent，强制落在 cwd/source/
+- split_by_chapters：source 必须在 cwd/source/ 内，output 强制落在 cwd/source/
 - compose_video：narration / reference_video 模式给友好错误，不是 KeyError
 - compose_video：--output 不能逃逸到 output/ 之外
 """
@@ -23,6 +24,7 @@ SKILLS_ROOT = REPO_ROOT / "agent_runtime_profile" / ".claude" / "skills"
 ADD_ASSETS = SKILLS_ROOT / "manage-project" / "scripts" / "add_assets.py"
 SPLIT_EPISODE = SKILLS_ROOT / "manage-project" / "scripts" / "split_episode.py"
 PEEK_SPLIT = SKILLS_ROOT / "manage-project" / "scripts" / "peek_split_point.py"
+SPLIT_BY_CHAPTERS = SKILLS_ROOT / "manage-project" / "scripts" / "split_by_chapters.py"
 COMPOSE_VIDEO = SKILLS_ROOT / "compose-video" / "scripts" / "compose_video.py"
 
 # compose_video.main() 在进入路径围栏前会先 check_ffmpeg；CI 环境若缺 ffmpeg/ffprobe
@@ -308,6 +310,149 @@ def test_peek_split_point_rejects_source_dir(fake_project: Path) -> None:
 def test_peek_split_point_accepts_source_in_project(fake_project: Path) -> None:
     result = _run(PEEK_SPLIT, fake_project, "--source", "source/novel.txt", "--target", "100")
     assert result.returncode == 0, result.stderr
+
+
+# ---------- split_by_chapters.py ----------
+
+
+def _write_chaptered_novel(project_dir: Path) -> None:
+    text = (
+        "作品简介：这段内容不应该进入第一集。\n"
+        "第一章 初见\n"
+        + "第一章正文内容。" * 80
+        + "\n"
+        "第 2 章 重逢\n"
+        + "第二章正文内容。" * 80
+        + "\n"
+        "Chapter 3 Choice\n"
+        + "第三章正文内容。" * 80
+        + "\n"
+        "04 余波\n"
+        + "第四章正文内容。" * 80
+        + "\n"
+    )
+    (project_dir / "source" / "chaptered.txt").write_text(text, encoding="utf-8")
+
+
+def test_split_by_chapters_rejects_non_project_cwd(tmp_path: Path) -> None:
+    result = _run(
+        SPLIT_BY_CHAPTERS,
+        tmp_path,
+        "--source",
+        "source/x.txt",
+        "--chapters-per-episode",
+        "2",
+        "--dry-run",
+    )
+    assert result.returncode != 0
+    assert "必须在项目目录内运行" in result.stderr
+
+
+def test_split_by_chapters_rejects_source_outside(fake_project: Path) -> None:
+    (fake_project / "novel.txt").write_text("第一章\n正文" * 100, encoding="utf-8")
+    result = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "novel.txt",
+        "--chapters-per-episode",
+        "2",
+        "--dry-run",
+    )
+    assert result.returncode != 0
+    assert "源文件必须位于" in result.stderr
+
+
+def test_split_by_chapters_rejects_source_symlink(fake_project: Path, tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "novel.txt").write_text("第一章\n外部内容" * 100, encoding="utf-8")
+    shutil.rmtree(fake_project / "source")
+    (fake_project / "source").symlink_to(external)
+
+    result = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "source/novel.txt",
+        "--chapters-per-episode",
+        "2",
+        "--dry-run",
+    )
+    assert result.returncode != 0
+    assert "不能是符号链接" in result.stderr
+
+
+def test_split_by_chapters_dry_run_detects_common_titles(fake_project: Path) -> None:
+    _write_chaptered_novel(fake_project)
+    result = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "source/chaptered.txt",
+        "--chapters-per-episode",
+        "2",
+        "--dry-run",
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.split("\n[Dry Run]", 1)[0])
+    assert payload["chapters_count"] == 4
+    assert payload["episodes_count"] == 2
+    assert payload["preface_chars"] > 0
+    assert payload["episodes"][0]["chapters"] == [1, 2]
+    assert payload["episodes"][1]["chapters"] == [3, 4]
+    assert not (fake_project / "source" / "episode_1.txt").exists()
+
+
+def test_split_by_chapters_writes_outputs_and_excludes_preface(fake_project: Path) -> None:
+    _write_chaptered_novel(fake_project)
+    result = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "source/chaptered.txt",
+        "--chapters-per-episode",
+        "2",
+    )
+    assert result.returncode == 0, result.stderr
+    ep1 = fake_project / "source" / "episode_1.txt"
+    ep2 = fake_project / "source" / "episode_2.txt"
+    preface = fake_project / "source" / "preface.txt"
+    index_path = fake_project / "source" / "episode_index.json"
+    assert ep1.is_file()
+    assert ep2.is_file()
+    assert preface.is_file()
+    assert index_path.is_file()
+    assert "作品简介" not in ep1.read_text(encoding="utf-8")
+    assert "第一章 初见" in ep1.read_text(encoding="utf-8")
+    assert "Chapter 3 Choice" in ep2.read_text(encoding="utf-8")
+    assert "作品简介" in preface.read_text(encoding="utf-8")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index[0]["chapters"] == [1, 2]
+    assert index[1]["chapters"] == [3, 4]
+
+
+def test_split_by_chapters_refuses_overwrite_without_flag(fake_project: Path) -> None:
+    _write_chaptered_novel(fake_project)
+    first = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "source/chaptered.txt",
+        "--chapters-per-episode",
+        "2",
+    )
+    assert first.returncode == 0, first.stderr
+    second = _run(
+        SPLIT_BY_CHAPTERS,
+        fake_project,
+        "--source",
+        "source/chaptered.txt",
+        "--chapters-per-episode",
+        "2",
+    )
+    assert second.returncode != 0
+    assert "输出文件已存在" in second.stderr
 
 
 # ---------- compose_video.py ----------

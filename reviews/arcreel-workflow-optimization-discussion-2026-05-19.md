@@ -334,3 +334,42 @@ tools/seedance_web_worker/
 4. 减少弱价值负向提示词
 5. 保留“不要出现文字”等关键限制
 ```
+
+## 2026-05-20 阶段 2 简版优化
+
+阶段 2 先不引入复杂的 AI 剧集规划中间文件，改为“章节识别 + 按 N 章切一集”优先，原有字数切分作为兜底。
+
+新增脚本：
+
+```text
+agent_runtime_profile/.claude/skills/manage-project/scripts/split_by_chapters.py
+```
+
+脚本行为：
+
+- 只识别独立单行章节标题。
+- 内置常见格式：
+  - `第1章`
+  - `第一章`
+  - `第 1 章`
+  - `Chapter 1`
+  - `CHAPTER 1`
+  - `01`
+- 标题后可以有标题文本，也可以没有标题。
+- 第一个章节标题之前的内容不进入 `episode_N.txt`；正式执行时写入 `source/preface.txt`。
+- 支持 `--dry-run` 展示识别结果，用户确认后再正式切分。
+- 正式执行生成 `source/episode_N.txt` 和 `source/episode_index.json`。
+- 默认不覆盖已有输出，需显式加 `--overwrite`。
+
+工作流接入：
+
+- `manga-workflow` 阶段 2 改为优先询问用户“每集几章”。
+- 先运行：
+
+```bash
+python .claude/skills/manage-project/scripts/split_by_chapters.py --source {源文件} --chapters-per-episode {每集章数} --dry-run
+```
+
+- dry-run 展示识别章节数、前言字数、前 10 章 / 后 5 章、预计生成集数和每集章节范围。
+- 用户确认后去掉 `--dry-run` 正式切分。
+- 如果章节识别失败、结果明显不可信，或用户要求按字数切分，则回退旧的 `peek_split_point.py` + `split_episode.py`。
