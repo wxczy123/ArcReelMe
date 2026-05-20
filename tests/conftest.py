@@ -84,9 +84,13 @@ def _stub_sandbox_check(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _profile_env(monkeypatch, tmp_path):
-    """Pin ``agent_profile_dir()`` to a per-test ``tmp_path/agent_runtime_profile``
-    so tests that build a fake profile under tmp_path are exercised against the
-    env-driven contract instead of the repo-level default.
+    """Pin runtime profile/data dirs to per-test ``tmp_path``.
+
+    ``agent_profile_dir()`` is pointed at ``tmp_path/agent_runtime_profile`` so
+    tests that build a fake profile under tmp_path are exercised against the
+    env-driven contract instead of the repo-level default. ``app_data_dir()`` is
+    also pointed at ``tmp_path/projects`` so FastAPI lifespan tests cannot scan
+    or mutate the developer's real ``projects/`` directory during profile sync.
 
     Also seed the profile with a minimal ``.claude/`` + ``CLAUDE.md`` so unrelated
     tests that go through ``ProjectManager.create_project`` (which triggers
@@ -102,6 +106,12 @@ def _profile_env(monkeypatch, tmp_path):
     # 不撞 FileExistsError；那些测试自己会构造完整 profile 内容。
     (profile_dir / "CLAUDE.md").write_text("")
     monkeypatch.setenv("ARCREEL_PROFILE_DIR", str(profile_dir))
+    data_dir = tmp_path / "projects"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ARCREEL_DATA_DIR", str(data_dir))
+    from lib.app_data_dir import _reset_for_tests
+
+    _reset_for_tests()
 
 
 @pytest.fixture()
