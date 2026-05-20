@@ -7,7 +7,14 @@ from typing import Any
 from claude_agent_sdk import tool
 
 from lib.asset_types import ASSET_SPECS, AssetSpec
-from lib.character_assets import CHARACTER_REF_SLOTS, character_ref_resource_id, validate_form_id, validate_ref_slot
+from lib.character_assets import (
+    CHARACTER_REF_SLOTS,
+    DEFAULT_FORM_ID,
+    character_ref_resource_id,
+    ensure_character_forms,
+    validate_form_id,
+    validate_ref_slot,
+)
 from lib.generation_queue_client import (
     BatchTaskSpec,
     batch_enqueue_and_wait,
@@ -242,13 +249,35 @@ def list_pending_character_refs_tool(ctx: ToolContext):
 
 def _collect_used_character_forms(pm: ProjectManager, project_name: str, script_file: str) -> set[tuple[str, str]]:
     script = pm.load_script(project_name, script_file)
-    items = script.get("scenes") if isinstance(script.get("scenes"), list) else []
+    project = pm.load_project(project_name)
+    characters = project.get("characters") if isinstance(project.get("characters"), dict) else {}
+
+    def _default_form_for(name: str) -> str:
+        char_data = characters.get(name)
+        if isinstance(char_data, dict):
+            return str(ensure_character_forms(dict(char_data)).get("default_form") or DEFAULT_FORM_ID)
+        return DEFAULT_FORM_ID
+
     used: set[tuple[str, str]] = set()
-    for item in items:
+
+    scene_items = script.get("scenes") if isinstance(script.get("scenes"), list) else []
+    for item in scene_items:
         char_names = item.get("characters_in_scene") or []
         forms = item.get("character_forms") if isinstance(item.get("character_forms"), dict) else {}
         for name in char_names:
-            form_id = forms.get(name) or "default"
+            form_id = forms.get(name) or _default_form_for(str(name))
+            used.add((str(name), str(form_id)))
+
+    video_units = script.get("video_units") if isinstance(script.get("video_units"), list) else []
+    for unit in video_units:
+        refs = unit.get("references") if isinstance(unit.get("references"), list) else []
+        for ref in refs:
+            if not isinstance(ref, dict) or ref.get("type") != "character":
+                continue
+            name = ref.get("name")
+            if not name:
+                continue
+            form_id = ref.get("form_id") or _default_form_for(str(name))
             used.add((str(name), str(form_id)))
     return used
 

@@ -75,6 +75,33 @@ class TestPromptBuildersScript:
         )
         assert "横屏构图" in prompt
 
+    def test_build_drama_prompt_lists_character_forms(self):
+        prompt = build_drama_prompt(
+            project_overview={"synopsis": "动作", "genre": "动作", "theme": "成长", "world_setting": "近未来"},
+            style="赛博",
+            style_description="high contrast",
+            characters={
+                "林": {
+                    "description": "青年男性",
+                    "default_form": "default",
+                    "forms": {
+                        "default": {"label": "常服", "description": "黑色夹克"},
+                        "combat": {"label": "战斗形态", "description": "护目镜与战术外套"},
+                    },
+                }
+            },
+            scenes={"天台": {}},
+            props={"芯片": {}},
+            scenes_md="E1S01 | 追逐",
+            supported_durations=[4, 6, 8],
+            default_duration=8,
+            aspect_ratio="16:9",
+        )
+
+        assert "default_form: default" in prompt
+        assert "combat" in prompt
+        assert "character_forms" in prompt
+
     def test_no_enum_listing(self):
         """schema 已声明枚举不在 prompt 中重复列举。"""
         prompt = build_drama_prompt(

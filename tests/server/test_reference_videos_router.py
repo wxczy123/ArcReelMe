@@ -25,7 +25,34 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
                 "content_mode": "narration",
                 "generation_mode": "reference_video",
                 "style": "s",
-                "characters": {"张三": {"description": "x"}},
+                "characters": {
+                    "张三": {
+                        "description": "x",
+                        "default_form": "default",
+                        "forms": {
+                            "default": {
+                                "label": "默认造型",
+                                "description": "",
+                                "storyboard_ref_slot": "three_view",
+                                "input_refs": [],
+                                "refs": {
+                                    "full_body": {"path": "", "purpose": "storyboard_reference"},
+                                    "three_view": {"path": "", "purpose": "consistency_review"},
+                                },
+                            },
+                            "sick": {
+                                "label": "病弱形态",
+                                "description": "",
+                                "storyboard_ref_slot": "three_view",
+                                "input_refs": [],
+                                "refs": {
+                                    "full_body": {"path": "", "purpose": "storyboard_reference"},
+                                    "three_view": {"path": "", "purpose": "consistency_review"},
+                                },
+                            },
+                        },
+                    }
+                },
                 "scenes": {"酒馆": {"description": "x"}},
                 "props": {},
                 "episodes": [{"episode": 1, "title": "E1", "script_file": "scripts/episode_1.json"}],
@@ -86,6 +113,41 @@ def test_add_unit_creates_minimal_entry(client: TestClient):
     assert payload["unit"]["unit_id"].startswith("E1U")
     assert payload["unit"]["duration_seconds"] == 3
     assert payload["unit"]["references"] == [{"type": "character", "name": "张三"}]
+
+
+def test_add_unit_accepts_character_form_id(client: TestClient):
+    resp = client.post(
+        "/api/v1/projects/demo/reference-videos/episodes/1/units",
+        json={
+            "prompt": "Shot 1 (3s): @张三 推门",
+            "references": [{"type": "character", "name": "张三", "form_id": "sick"}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["unit"]["references"] == [{"type": "character", "name": "张三", "form_id": "sick"}]
+
+
+def test_add_unit_rejects_unknown_character_form_id(client: TestClient):
+    resp = client.post(
+        "/api/v1/projects/demo/reference-videos/episodes/1/units",
+        json={
+            "prompt": "Shot 1 (3s): @张三 推门",
+            "references": [{"type": "character", "name": "张三", "form_id": "missing"}],
+        },
+    )
+    assert resp.status_code == 400
+    assert "form_id" in resp.json()["detail"]
+
+
+def test_add_unit_rejects_form_id_on_scene(client: TestClient):
+    resp = client.post(
+        "/api/v1/projects/demo/reference-videos/episodes/1/units",
+        json={
+            "prompt": "Shot 1 (3s): @酒馆 全景",
+            "references": [{"type": "scene", "name": "酒馆", "form_id": "night"}],
+        },
+    )
+    assert resp.status_code == 422
 
 
 def test_add_unit_rejects_unknown_asset_reference(client: TestClient):

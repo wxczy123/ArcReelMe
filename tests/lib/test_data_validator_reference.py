@@ -124,6 +124,57 @@ def test_validator_rejects_invalid_shot_duration(tmp_path: Path):
     assert any("duration 必须是 1-15" in e for e in result.errors)
 
 
+def test_validator_accepts_reference_video_character_form_id(tmp_path: Path):
+    project = _reference_project()
+    project["characters"]["张三"] = {
+        "description": "x",
+        "default_form": "default",
+        "forms": {
+            "default": {
+                "label": "默认造型",
+                "description": "",
+                "storyboard_ref_slot": "three_view",
+                "input_refs": [],
+                "refs": {
+                    "full_body": {"path": "", "purpose": "storyboard_reference"},
+                    "three_view": {"path": "", "purpose": "consistency_review"},
+                },
+            },
+            "sick": {
+                "label": "病弱形态",
+                "description": "",
+                "storyboard_ref_slot": "three_view",
+                "input_refs": [],
+                "refs": {
+                    "full_body": {"path": "", "purpose": "storyboard_reference"},
+                    "three_view": {"path": "", "purpose": "consistency_review"},
+                },
+            },
+        },
+    }
+    script = _valid_reference_script()
+    script["video_units"][0]["references"][0]["form_id"] = "sick"
+    _write(tmp_path, "project.json", project)
+    _write(tmp_path, "scripts/episode_1.json", script)
+
+    v = DataValidator()
+    result = v.validate_project_tree(tmp_path)
+    assert result.valid, result.errors
+
+
+def test_validator_rejects_reference_video_unknown_character_form_id(tmp_path: Path):
+    project = _reference_project()
+    script = _valid_reference_script()
+    script["video_units"][0]["references"][0]["form_id"] = "missing"
+    _write(tmp_path, "project.json", project)
+    _write(tmp_path, "scripts/episode_1.json", script)
+
+    v = DataValidator()
+    result = v.validate_project_tree(tmp_path)
+    assert not result.valid
+    assert any("不存在的形态" in e for e in result.errors)
+
+
 def test_validator_rejects_reference_video_in_content_mode(tmp_path: Path):
     """content_mode 严格只允许 narration / drama；reference_video 属于 generation_mode
     维度。UI 不可达该值，无需兼容迁移，直接拒绝即可。

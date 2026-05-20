@@ -5,8 +5,10 @@
 characters[name].forms[form_id].refs[slot].path
 
 slot 固定为:
-- full_body: 分镜/视频默认角色参考图
-- three_view: 三视图, 默认不喂给分镜
+- full_body: 单人全身主参考图, 可用于分镜/视频
+- three_view: 三视图, 默认用于分镜/视频参考
+
+默认用于分镜/视频的槽位为 ``three_view``。
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from typing import Any
 
 DEFAULT_FORM_ID = "default"
 CHARACTER_REF_SLOTS = ("full_body", "three_view")
-DEFAULT_STORYBOARD_REF_SLOT = "full_body"
+DEFAULT_STORYBOARD_REF_SLOT = "three_view"
 
 REF_PURPOSES = {
     "full_body": "storyboard_reference",
@@ -177,7 +179,12 @@ def get_storyboard_ref_path(entry: dict[str, Any], form_id: str | None = None) -
     slot = form.get("storyboard_ref_slot") or DEFAULT_STORYBOARD_REF_SLOT
     if slot not in CHARACTER_REF_SLOTS:
         slot = DEFAULT_STORYBOARD_REF_SLOT
-    return resolved_form_id, slot, get_ref_path(entry, resolved_form_id, slot)
+    rel_path = get_ref_path(entry, resolved_form_id, slot)
+    if not rel_path and slot != "full_body":
+        fallback = get_ref_path(entry, resolved_form_id, "full_body")
+        if fallback:
+            return resolved_form_id, "full_body", fallback
+    return resolved_form_id, slot, rel_path
 
 
 def character_ref_resource_id(character: str, form_id: str, slot: str) -> str:

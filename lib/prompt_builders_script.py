@@ -28,19 +28,21 @@ def _format_character_forms(characters: dict) -> str:
             lines.append(f"- {name}")
             continue
         desc = data.get("description") or ""
+        default_form = data.get("default_form") or "default"
         forms = data.get("forms") if isinstance(data.get("forms"), dict) else {}
         if not forms:
-            lines.append(f"- {name}: {desc}")
+            lines.append(f"- {name}: {desc}\n  default_form: {default_form}")
             continue
         form_bits = []
         for form_id, form in forms.items():
             if isinstance(form, dict):
                 label = form.get("label") or form_id
                 form_desc = form.get("description") or ""
-                form_bits.append(f"{form_id}（{label}：{form_desc}）")
+                default_mark = "，默认" if form_id == default_form else ""
+                form_bits.append(f"{form_id}（{label}：{form_desc}{default_mark}）")
             else:
                 form_bits.append(str(form_id))
-        lines.append(f"- {name}: {desc}\n  forms: " + "；".join(form_bits))
+        lines.append(f"- {name}: {desc}\n  default_form: {default_form}\n  forms: " + "；".join(form_bits))
     return "\n".join(lines)
 
 
@@ -240,7 +242,7 @@ def build_drama_prompt(
 </style>
 
 <characters>
-{_format_names(characters)}
+{_format_character_forms(characters)}
 </characters>
 
 <project_scenes>

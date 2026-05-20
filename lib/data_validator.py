@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from lib.asset_types import ASSET_TYPES
-from lib.character_assets import CHARACTER_REF_SLOTS, DEFAULT_FORM_ID, ensure_character_forms
+from lib.character_assets import (
+    CHARACTER_REF_SLOTS,
+    DEFAULT_FORM_ID,
+    DEFAULT_STORYBOARD_REF_SLOT,
+    ensure_character_forms,
+    validate_form_id,
+)
 from lib.json_io import load_json_or_none
 from lib.project_manager import effective_mode
 
@@ -218,7 +224,7 @@ class DataValidator:
                     if not isinstance(form, dict):
                         errors.append(f"角色 '{char_name}' 形态 '{form_id}' 数据格式错误，应为对象")
                         continue
-                    slot = form.get("storyboard_ref_slot") or "full_body"
+                    slot = form.get("storyboard_ref_slot") or DEFAULT_STORYBOARD_REF_SLOT
                     if slot not in CHARACTER_REF_SLOTS:
                         errors.append(f"角色 '{char_name}' 形态 '{form_id}' storyboard_ref_slot 无效: {slot}")
                     refs = form.get("refs")
@@ -547,6 +553,7 @@ class DataValidator:
             if not isinstance(unit, dict):
                 errors.append(f"{prefix}: 必须是对象")
                 continue
+            seen_character_refs: dict[str, str] = {}
 
             if not unit.get("unit_id"):
                 errors.append(f"{prefix}: 缺少 unit_id")
@@ -588,6 +595,33 @@ class DataValidator:
                 bucket = bucket_by_type.get(rtype, set())
                 if rname not in bucket:
                     errors.append(f"{prefix}: 引用的{rtype} '{rname}' 不在 project.json 对应 bucket 中")
+                    continue
+                form_id = ref.get("form_id")
+                if rtype == "character":
+                    char_data = self._project_characters_cache.get(rname)
+                    if not isinstance(char_data, dict):
+                        char_data = ensure_character_forms({})
+                        self._project_characters_cache[rname] = char_data
+                    forms = char_data.get("forms") if isinstance(char_data.get("forms"), dict) else {}
+                    resolved_form = str(form_id or char_data.get("default_form") or DEFAULT_FORM_ID)
+                    try:
+                        resolved_form = validate_form_id(resolved_form)
+                    except ValueError as exc:
+                        errors.append(f"{prefix}: 角色 '{rname}' form_id 无效: {exc}")
+                        continue
+                    if resolved_form not in forms:
+                        errors.append(f"{prefix}: 角色 '{rname}' 引用了不存在的形态: {resolved_form}")
+                        continue
+                    previous_form = seen_character_refs.get(rname)
+                    if previous_form is not None and previous_form != resolved_form:
+                        errors.append(
+                            f"{prefix}: 角色 '{rname}' 在同一 video_unit 中重复引用形态 "
+                            f"{previous_form!r} / {resolved_form!r}；请拆分 unit"
+                        )
+                    else:
+                        seen_character_refs[rname] = resolved_form
+                elif form_id not in (None, ""):
+                    errors.append(f"{prefix}: {rtype} reference 不应包含 form_id")
 
             if project_dir is not None:
                 self._validate_generated_assets(

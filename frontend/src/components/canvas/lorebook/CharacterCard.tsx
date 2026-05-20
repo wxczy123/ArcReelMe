@@ -63,7 +63,7 @@ function makeFallbackForm(description: string): CharacterForm {
   return {
     label: "默认造型",
     description,
-    storyboard_ref_slot: "full_body",
+    storyboard_ref_slot: "three_view",
     input_refs: [],
     refs: {
       full_body: { path: "", purpose: "storyboard_reference" },
@@ -137,7 +137,8 @@ export function CharacterCard({
   }, [activeFormId, formEntries, normalized.default_form, normalized.forms]);
 
   const isDirty = description !== normalized.description || voiceStyle !== (normalized.voice_style ?? "");
-  const previewPath = activeForm.refs[activeForm.storyboard_ref_slot]?.path || activeForm.refs.full_body?.path || "";
+  const activeRefSlot = activeForm.storyboard_ref_slot || "three_view";
+  const previewPath = activeForm.refs[activeRefSlot]?.path || activeForm.refs.full_body?.path || "";
   const previewUrl = previewPath ? API.getFileUrl(projectName, previewPath, fingerprints[previewPath]) : null;
 
   const handleSave = async () => {

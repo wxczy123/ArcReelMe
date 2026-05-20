@@ -41,12 +41,16 @@ const sheetOf = (
   bucket: Record<string, unknown> | undefined,
   kind: AssetKind,
   name: string,
+  formId?: string | null,
 ): string | null => {
   const entry = bucket?.[name] as BucketEntry | undefined;
   if (!entry) return null;
   if (kind === "character" && entry.forms) {
-    const form = entry.forms[entry.default_form || "default"] ?? Object.values(entry.forms)[0];
-    const slot = form?.storyboard_ref_slot || "full_body";
+    const form =
+      (formId ? entry.forms[formId] : undefined) ??
+      entry.forms[entry.default_form || "default"] ??
+      Object.values(entry.forms)[0];
+    const slot = form?.storyboard_ref_slot || "three_view";
     return form?.refs?.[slot]?.path || form?.refs?.full_body?.path || null;
   }
   return entry[SHEET_FIELD[kind]] ?? null;
@@ -142,7 +146,7 @@ export function ReferencePanel({
       prop: props,
     };
     return references.map((r) => {
-      const imagePath = sheetOf(buckets[r.type], r.type, r.name);
+      const imagePath = sheetOf(buckets[r.type], r.type, r.name, r.form_id);
       const fingerprint = imagePath ? (assetFingerprints[imagePath] ?? null) : null;
       const imageUrl = imagePath ? API.getFileUrl(projectName, imagePath, fingerprint) : null;
       return { ref: r, imageUrl };

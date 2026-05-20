@@ -9,10 +9,11 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lib.app_data_dir import app_data_dir
 from lib.asset_types import BUCKET_KEY
+from lib.character_assets import DEFAULT_FORM_ID, ensure_character_forms, validate_form_id
 from lib.generation_queue import get_generation_queue
 from lib.project_manager import ProjectManager, effective_mode
 from lib.reference_video import parse_prompt
@@ -38,6 +39,17 @@ def get_project_manager() -> ProjectManager:
 class ReferenceDto(BaseModel):
     type: str = Field(pattern=r"^(character|scene|prop)$")
     name: str
+    form_id: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_form_id_scope(self) -> ReferenceDto:
+        if not self.form_id:
+            self.form_id = None
+            return self
+        if self.type != "character":
+            raise ValueError("form_id 仅适用于 character reference")
+        self.form_id = validate_form_id(self.form_id)
+        return self
 
 
 class AddUnitRequest(BaseModel):
@@ -77,14 +89,30 @@ def _load_episode_script(project_name: str, episode: int) -> tuple[dict, dict, s
 def _validate_references_exist(project: dict, refs: list[dict]) -> None:
     """确保 references 都在 project.json 对应 bucket 中。"""
     missing: list[str] = []
+    invalid_forms: list[str] = []
     for r in refs:
         bucket = project.get(BUCKET_KEY.get(r["type"], "")) or {}
         if r["name"] not in bucket:
             missing.append(f"{r['type']}:{r['name']}")
+            continue
+        if r["type"] == "character":
+            char_data = bucket.get(r["name"])
+            if isinstance(char_data, dict):
+                normalized = ensure_character_forms(dict(char_data))
+                form_id = r.get("form_id") or normalized.get("default_form") or DEFAULT_FORM_ID
+                if form_id not in (normalized.get("forms") or {}):
+                    invalid_forms.append(f"character:{r['name']}/{form_id}")
+        elif r.get("form_id"):
+            invalid_forms.append(f"{r['type']}:{r['name']} 不应包含 form_id")
     if missing:
         raise HTTPException(
             status_code=400,
             detail=f"references not registered: {', '.join(missing)}",
+        )
+    if invalid_forms:
+        raise HTTPException(
+            status_code=400,
+            detail=f"references form_id invalid: {', '.join(invalid_forms)}",
         )
 
 
@@ -147,7 +175,7 @@ async def add_unit(
 ) -> dict[str, Any]:
     project, script, script_file = _load_episode_script(project_name, episode)
 
-    refs = [r.model_dump() for r in req.references]
+    refs = [r.model_dump(exclude_none=True) for r in req.references]
     _validate_references_exist(project, refs)
 
     unit = _build_unit_dict(
@@ -193,7 +221,7 @@ async def patch_unit(
     unit = _find_unit(script, unit_id)
 
     if req.references is not None:
-        refs = [r.model_dump() for r in req.references]
+        refs = [r.model_dump(exclude_none=True) for r in req.references]
         _validate_references_exist(project, refs)
         unit["references"] = refs
 

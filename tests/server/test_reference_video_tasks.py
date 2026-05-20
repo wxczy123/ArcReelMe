@@ -89,6 +89,43 @@ def test_resolve_unit_references_maps_sheets(tmp_path: Path):
     assert [p.name for p in resolved] == ["张三.png", "酒馆.png"]
 
 
+def test_resolve_unit_references_uses_character_form_id(tmp_path: Path):
+    proj_dir = _write_project(tmp_path)
+    sick_dir = proj_dir / "characters" / "张三" / "sick"
+    sick_dir.mkdir(parents=True)
+    (sick_dir / "three_view.png").write_bytes((proj_dir / "characters" / "张三.png").read_bytes())
+    project, _unit = _load_project_and_unit(proj_dir, "E1U1")
+    project["characters"]["张三"] = {
+        "description": "x",
+        "default_form": "default",
+        "forms": {
+            "default": {
+                "label": "默认造型",
+                "description": "",
+                "storyboard_ref_slot": "three_view",
+                "input_refs": [],
+                "refs": {
+                    "full_body": {"path": "characters/张三.png", "purpose": "storyboard_reference"},
+                    "three_view": {"path": "", "purpose": "consistency_review"},
+                },
+            },
+            "sick": {
+                "label": "病弱形态",
+                "description": "",
+                "storyboard_ref_slot": "three_view",
+                "input_refs": [],
+                "refs": {
+                    "full_body": {"path": "", "purpose": "storyboard_reference"},
+                    "three_view": {"path": "characters/张三/sick/three_view.png", "purpose": "consistency_review"},
+                },
+            },
+        },
+    }
+    refs = [{"type": "character", "name": "张三", "form_id": "sick"}]
+    resolved = _resolve_unit_references(project, proj_dir, refs)
+    assert [p.as_posix() for p in resolved] == [(sick_dir / "three_view.png").as_posix()]
+
+
 def test_resolve_unit_references_missing_sheet_raises(tmp_path: Path):
     proj_dir = _write_project(tmp_path)
     project, unit = _load_project_and_unit(proj_dir, "E1U1")

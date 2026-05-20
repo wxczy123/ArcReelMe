@@ -141,6 +141,127 @@
 - `character_forms` 应更严格继承阶段 3 的角色状态，不要自由猜。
 - 如果阶段 3 增加“出场角色/情绪变化/关键动作”，阶段 4 prompt 应明确要求吸收这些字段。
 
+### 参考生视频模式：阶段 3 / 阶段 4 补充
+
+前提：
+
+- 上面的阶段 3 / 阶段 4 主要针对“剧集模式 + 图生视频”。
+- 如果是“剧集模式 + 参考生视频”，阶段 3 / 阶段 4 的目标会明显不同。
+- 参考生视频不生成分镜图，不需要 `image_prompt`，也不走“分镜图 -> 图生视频”的链路。
+
+两种模式的核心区别：
+
+```text
+图生视频：
+source/episode_N.txt
+  -> drafts/episode_N/step1_normalized_script.md
+  -> scripts/episode_N.json / scenes[]
+  -> 分镜图
+  -> 图生视频
+
+参考生视频：
+source/episode_N.txt
+  -> drafts/episode_N/step1_reference_units.md
+  -> scripts/episode_N.json / video_units[]
+  -> 直接使用角色 / 场景 / 道具参考图生成视频
+```
+
+#### 参考生视频阶段 3：video_unit 拆分
+
+当前职责：
+
+- 由 `split-reference-video-units` 将本集原文拆成多个 `video_unit`。
+- 每个 `video_unit` 对应一次视频生成调用。
+- 一个 `video_unit` 内可以包含 1-4 个 `shot`。
+- 输出中间文件：
+
+```text
+drafts/episode_N/step1_reference_units.md
+```
+
+当前需要解决的问题：
+
+- 不能把图生视频的“分镜拆解思路”直接搬到参考生视频。
+- 参考生视频的关键不是“每个画面怎么构图”，而是“每次视频生成调用该喂哪些参考图，以及这些参考图能否支撑当前动作”。
+- `shot text` 里不应该继续写大量外貌、服装、场景色调、光影细节，因为这些信息应由参考图承担。
+- 不能在 `@名称` 中引用 `project.json` 里没有注册的角色、场景、道具。
+- 如果资产表为空，或当前集需要的关键资产不存在，应该先回到资产提取 / 资产生成，而不是继续生成一堆无法落地的 `@名称`。
+
+优化方向：
+
+- `video_unit` 按“同一时间、同一地点、主体动作连续、参考图集合稳定”来切分。
+- 不为了凑满时长强行合并不连续事件；时间、地点、主体动作发生明显变化时应拆成新 unit。
+- 每个 unit 的 `references` 只放真正要喂给模型的关键资产。
+- `references` 数量必须受当前视频模型的 `max_reference_images` 约束。
+- 每个 `shot text` 保持直接服务视频模型，不新增抽象字段，不写成复杂导演分镜。
+- 每个 `shot text` 开头补一句短镜头描述，至少带上机位 / 景别 / 运镜 / 构图里的 2-3 项，例如高角度俯拍、固定镜头、远景；平移镜头从左边树林移到右边建筑；中景、前景虚化、角色 A 与角色 B 对峙。
+- 人物情绪应直接融入 `shot text`，但必须写成可见表现，例如眼神躲闪、怔住后移开视线、手指短暂停顿、呼吸变慢、嘴角僵住、眼圈泛红、下意识攥紧道具。
+- 避免抽象心理词堆砌，例如内心崩溃、复杂痛苦、命运感、宿命拉扯、情绪爆炸。
+- `@名称` 只用于镜头里实际可见、需要参考图的角色 / 场景 / 道具；只被提及、不出镜的人物不要 `@`，避免白占 references。
+- 避免抽象比喻和文学化修辞，例如“像厚重冰层压下来”“仿佛被命运拉扯”；统一改写成可见动作、表情或身体反应。
+- 镜头里实际出现的角色需要从该角色已有 `forms` 中选择一个 `form_id`；没有明确特殊造型时使用 `default_form`。
+- 同一个 `video_unit` 中同一角色只允许一种形态；如果一个角色需要从常服切到病弱、回忆、礼服等特殊形态，应拆成两个 unit。
+- `shot text` 聚焦可见动作和空间关系，例如：
+
+```text
+固定中景，轻微推进。@苏洄 坐在 @酒店房间 床边，低头握住 @药片，手指短暂停顿后仰头吞下，眼神疲惫地看向窗外。
+```
+
+- 避免把视觉设定重新写进 `shot text`，例如：
+
+```text
+身形偏瘦、脸色苍白的苏洄坐在昏暗冷色调酒店房间里，穿着深色大衣，低头握住白色药片。
+```
+
+- 如果需要新资产，应报告给主 agent 补充资产，而不是在 `step1_reference_units.md` 里先发明未注册资产。
+- 如果需要新角色形态，应报告给主 agent 补充角色 form，而不是在 `references` 里发明新 `form_id`。
+- `shots 摘要` 和完整 `shot text` 要一致，避免摘要写一套、正文写另一套。
+
+阶段 3 推荐中间信息：
+
+```text
+unit_id | shots 数 | 总时长 | references | shots 摘要
+
+完整 shot 文本：
+Shot 1 (Xs): 短镜头描述。@角色 在 @场景 中执行具体动作，并加入可见表情 / 情绪反应；只给镜头里实际可见的资产打 @。
+Shot 2 (Xs): ...
+
+references 写法：
+character:角色名/form_id, scene:场景名, prop:道具名
+```
+
+#### 参考生视频阶段 4：ReferenceVideoScript 生成
+
+当前职责：
+
+- 将 `step1_reference_units.md` 转成正式 JSON。
+- 输出 `ReferenceVideoScript.video_units[]`。
+- 每个 `video_unit` 包含：
+  - `unit_id`
+  - `shots[]`
+  - `references[]`
+  - `duration_seconds`
+
+优化方向：
+
+- 严格继承阶段 3 的 `unit_id`、shot 数、shot 顺序、references 和时长，不要自由重排。
+- `duration_seconds` 应由 `shots[].duration` 求和得到，不要手填出错。
+- `shots[].duration` 必须来自当前视频模型支持的时长集合。
+- `references[]` 必须覆盖 `shot text` 中出现的全部 `@名称`，不能多，也不能漏。
+- `references[]` 的 `name` 必须来自 `project.json` 的 characters / scenes / props。
+- 角色引用增加 `form_id`：`{"type":"character","name":"苏洄","form_id":"sick"}`；scene / prop 不写 `form_id`。
+- 不生成 `image_prompt` / `video_prompt`，也不引入图生视频的分镜图字段。
+- 参考生视频的“导演语言”应体现在动作连续性和人物关系上，而不是细分景别、构图、光影。
+- 如果某个 unit 需要的参考图超过模型上限，应回到阶段 3 重新拆 unit，而不是在阶段 4 硬塞。
+
+阶段 4 输出质量标准：
+
+- 每个 `video_unit` 都能直接映射为一次可执行的视频生成任务。
+- 每个 `@名称` 都能找到对应资产图。
+- 每个角色 reference 都能解析到 `project.json.characters[角色].forms[form_id]`，并按该形态的 `storyboard_ref_slot` 取图。
+- 每个 unit 的参考图集合足够少、足够明确，并且能支撑该 unit 的动作。
+- JSON 不承担资产创造职责，只负责把阶段 3 的 unit 计划结构化。
+
 ## 5. 阶段 5：资产生成 Prompt
 
 ### 角色图 Prompt
@@ -403,3 +524,33 @@ tests/test_prompt_builders.py
 - 道具图：
   - 保留多视角/三视图布局和 `外观结构完整，焦点清晰。`
   - 删除 `画面避免` 尾巴。
+
+## 2026-05-20 参考生视频角色形态与默认参考槽位
+
+本次把参考生视频也接入角色多形态资产库，并同步修正图生视频剧本 prompt 的角色形态信息。
+
+修改点：
+
+- `split-reference-video-units` 阶段 3 读取角色 `forms`，要求角色 reference 写成 `character:角色名/form_id`。
+- `ReferenceVideoScript.video_units[].references[]` 的 character 条目支持 `form_id`；scene / prop 仍不允许 `form_id`。
+- 参考生视频执行时按 `reference.form_id -> forms[form_id].storyboard_ref_slot` 解析角色参考图。
+- 如果当前槽位没有图，解析层会回退到同形态 `full_body`，避免三视图尚未生成时直接失败。
+- `build_reference_video_prompt` 现在向文本模型展示每个角色的 `default_form` 和全部 forms，要求模型根据剧情选择形态。
+- `build_drama_prompt` 的 `<characters>` 也改为列出 forms 详情，图生视频生成 `character_forms` 时有可选形态依据。
+- 新建 / 规范化角色形态的 `storyboard_ref_slot` 默认值从 `full_body` 改为 `three_view`；这个开关同时影响图生视频分镜参考图、宫格参考图和参考生视频参考图。
+
+涉及文件：
+
+```text
+agent_runtime_profile/.claude/agents/split-reference-video-units.md
+lib/character_assets.py
+lib/script_models.py
+lib/prompt_builders_reference.py
+lib/prompt_builders_script.py
+lib/data_validator.py
+server/services/reference_video_tasks.py
+server/routers/reference_videos.py
+server/agent_runtime/sdk_tools/enqueue_assets.py
+frontend/src/components/canvas/reference/ReferencePanel.tsx
+frontend/src/types/reference-video.ts
+```

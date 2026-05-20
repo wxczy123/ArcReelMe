@@ -23,7 +23,16 @@ def reference_project(tmp_path: Path) -> Path:
           "overview": {"synopsis": "s", "genre": "g", "theme": "th", "world_setting": "w"},
           "style": "国漫",
           "style_description": "水墨",
-          "characters": {"主角": {"description": "d"}},
+          "characters": {
+            "主角": {
+              "description": "d",
+              "default_form": "default",
+              "forms": {
+                "default": {"label": "常服", "description": "d"},
+                "sick": {"label": "病弱", "description": "病房服装"}
+              }
+            }
+          },
           "scenes": {"酒馆": {"description": "d"}},
           "props": {},
           "episodes": [{"episode": 1, "title": "t1", "generation_mode": "reference_video"}]
@@ -48,6 +57,8 @@ async def test_script_generator_build_prompt_selects_reference_branch(reference_
     assert "ReferenceVideoScript" in prompt
     assert "references" in prompt
     assert "@名称" in prompt
+    assert "form_id" in prompt
+    assert "sick" in prompt
     # 不应出现 narration / drama 特征
     assert "characters_in_segment" not in prompt
 

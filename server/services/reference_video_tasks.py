@@ -51,8 +51,9 @@ def _resolve_unit_references(
         bucket = project.get(BUCKET_KEY[rtype]) or {}
         item = bucket.get(rname)
         if rtype == "character" and isinstance(item, dict):
+            form_id = ref.get("form_id") if isinstance(ref.get("form_id"), str) else None
             try:
-                _, _, sheet_rel = get_storyboard_ref_path(item)
+                _, _, sheet_rel = get_storyboard_ref_path(item, form_id)
             except Exception:
                 sheet_rel = None
         else:
@@ -115,7 +116,7 @@ def _render_unit_prompt(unit: dict) -> str:
     """
     shots = unit.get("shots") or []
     raw = "\n".join(str(s.get("text", "")) for s in shots)
-    references = [ReferenceResource(type=r["type"], name=r["name"]) for r in (unit.get("references") or [])]
+    references = [ReferenceResource.model_validate(r) for r in (unit.get("references") or [])]
     rendered = render_prompt_for_backend(raw, references)
     if not rendered.strip():
         raise ValueError("reference video unit prompt is empty: all shots[*].text are blank")

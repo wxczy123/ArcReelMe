@@ -502,7 +502,7 @@ def _normalize_video_prompt(prompt: str | dict) -> str:
 
 
 def _resolve_character_storyboard_ref(project: dict, char_name: str, item: dict) -> tuple[str, str, str] | None:
-    """按 item.character_forms → character.default_form → full_body 解析角色分镜参考图。"""
+    """按 item.character_forms → character.default_form → storyboard_ref_slot 解析角色分镜参考图。"""
     characters = project.get("characters", {})
     entry = characters.get(char_name)
     if not isinstance(entry, dict):

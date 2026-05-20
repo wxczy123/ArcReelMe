@@ -29,6 +29,16 @@ def test_reference_resource_valid_types():
         assert r.type == t
 
 
+def test_reference_resource_allows_character_form_id():
+    r = ReferenceResource(type="character", name="张三", form_id="sick")
+    assert r.form_id == "sick"
+
+
+def test_reference_resource_rejects_form_id_on_scene_or_prop():
+    with pytest.raises(ValidationError):
+        ReferenceResource(type="scene", name="酒馆", form_id="night")
+
+
 def test_reference_resource_rejects_clue():
     with pytest.raises(ValidationError):
         ReferenceResource(type="clue", name="张三")

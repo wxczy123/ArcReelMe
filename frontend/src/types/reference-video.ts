@@ -33,6 +33,8 @@ export interface ReferenceResource {
   type: AssetKind;
   /** Must already exist in project.json {characters|scenes|props} bucket */
   name: string;
+  /** Character form id. Only valid when type === "character"; scene/prop omit it. */
+  form_id?: string | null;
 }
 
 /**

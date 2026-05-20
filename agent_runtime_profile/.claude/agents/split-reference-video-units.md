@@ -13,7 +13,7 @@ description: "参考生视频模式单集视频单元拆分 subagent（reference
 - 本集小说文件（如 `source/episode_1.txt`）
 
 **自查数据**：
-- 角色 / 场景 / 道具名称从 `project.json`（相对 session cwd）的 `characters` / `scenes` / `props` 三张表读。
+- 角色 / 角色 forms / 场景 / 道具名称从 `project.json`（相对 session cwd）的 `characters` / `scenes` / `props` 三张表读。
 - 视频模型能力（`supported_durations` / `max_duration` / `max_reference_images`）和用户偏好（`default_duration`）由本 subagent 在 Step 0 查得（见下方工作流）。
 
 **输出**：保存 `drafts/episode_{N}/step1_reference_units.md` 后，返回 unit 统计摘要。
@@ -23,7 +23,10 @@ description: "参考生视频模式单集视频单元拆分 subagent（reference
 1. **跳过分镜**：不生成分镜图，直接按视频生成粒度（video_unit）拆分；每 unit = 一次生成调用。
 2. **参考图驱动**：每个 unit 的描述只用 `@角色 / @场景 / @道具` 引用**已注册**的资产名；不写外貌 / 服装 / 场景细节（由参考图承担视觉一致性）。
 3. **时长上限**：每 unit 所有 shot `duration` 之和不超过 Step 0 查得的 `max_duration`；总 references 数不超过 `max_reference_images`。
-4. **完成即返回**：独立完成全部工作后返回，不在中间步骤等待用户确认。
+4. **镜头与情绪可见化**：每个 shot 在文本开头给一句短镜头描述，至少包含机位 / 景别 / 运镜 / 构图中的 2-3 项，并把人物情绪写成表情、视线、停顿、手部动作等可见反应；不要写抽象心理概念。
+5. **可见引用优先**：`@名称` 只给镜头里实际可见、需要参考图的角色 / 场景 / 道具；只被提及、并没有出镜的角色 / 场景 / 道具不要 `@`，避免白占 references。
+6. **角色形态显式选择**：镜头中实际出现的每个角色都必须从该角色已有 forms 中选择一个 form_id；没有明确特殊造型时用 default_form。
+7. **完成即返回**：独立完成全部工作后返回，不在中间步骤等待用户确认。
 
 ## 工作流程
 
@@ -52,7 +55,7 @@ mcp__arcreel__get_video_capabilities({})
 ### Step 1: 读取项目信息和小说原文
 
 使用 Read 工具读取（相对 session cwd）：
-- `project.json` — 获取 characters / scenes / props 三张表
+- `project.json` — 获取 characters / forms / scenes / props 三张表
 - `source/episode_{N}.txt` — 单集原文
 
 ### Step 2: 按 video_unit 粒度拆分
@@ -67,11 +70,17 @@ mcp__arcreel__get_video_capabilities({})
   不要挑最短 / 保守值作为默认。
 - 时间 / 空间 / 情节重大切换点 → 开一个新 unit。
 - 一个 unit 涉及的角色 / 场景 / 道具总数不超过 Step 0 查到的 `max_reference_images`；超出时将次要角色融入背景描述，不进入 references。
+- 同一个 unit 中同一角色只能使用一种 form_id；如果同一角色从当前形态切到回忆形态、病弱形态、礼服形态等，优先拆成两个 unit。
 
 **描述规则**：
 
-- 每 shot 的 `text` 字段用中文叙事，聚焦当下瞬间可见动作。
-- 角色 / 场景 / 道具引用使用 `@名称`；名称需来自 project.json 三张表。
+- 每 shot 的 `text` 字段用中文叙事，结构为：`一句短镜头描述。具体动作与可见表情 / 情绪反应。`
+- 镜头描述只写一句，尽量包含 2-3 个要素，例如：高角度俯拍、低角度仰拍；固定镜头、旋转镜头、平移镜头；远景、近景、中景；前景虚化、背景虚化等。
+- 表情 / 情绪必须写成可见表现，例如：眼神躲闪、怔住后移开视线、手指短暂停顿、呼吸变慢、嘴角僵住、眼圈泛红、下意识攥紧道具。
+- 不要写抽象心理词堆砌，例如：内心崩溃、复杂痛苦、命运感、宿命拉扯、情绪爆炸。
+- 角色 / 场景 / 道具引用使用 `@名称`；名称需来自 project.json 三张表，且必须是当前镜头里实际可见、需要喂参考图的对象。
+- 只在对白、电话、回忆、提及、物品归属中出现但不实际入画的人物，不使用 `@`。
+- 不要写抽象比喻、文学化修辞或隐喻等难以被视频模型理解的内容，例如“像厚重冰层压下来”“彷佛被架在油锅上烤”；统一改写成可见动作、表情或身体反应。
 - 不要描写外貌、服装、场景色调、光影细节——这些由参考图提供。
 - 不要新增 project.json 中不存在的资产名。
 
@@ -79,6 +88,9 @@ mcp__arcreel__get_video_capabilities({})
 
 - 按首次出现顺序登记；调整顺序决定发送给模型的 `[图N]` 编号。
 - 每个 unit 的 references 是该 unit 所有 shot 中 `@` 提及的并集（去重）。
+- 角色 reference 写成 `character:角色名/form_id`，form_id 必须来自该角色 `forms`；没有明确特殊造型时使用该角色 `default_form`。
+- 场景 / 道具仍写成 `scene:名称` / `prop:名称`。
+- 不要发明 form_id；如果剧情需要的形态不存在，报告给主 agent 补充角色形态，不要在 references 里先写新形态。
 
 ### Step 3: 保存中间文件
 
@@ -90,13 +102,13 @@ mcp__arcreel__get_video_capabilities({})
 
 | unit_id | shots 数 | 总时长 | 涉及 references | shots 摘要 |
 |---------|----------|--------|------------------|------------|
-| E<ep>U<idx> | <1-4> | <sum_of_shot_durations>s | <type:name, ...> | Shot1(<d1>s)...Shot<k>(<dk>s): <叙事文本> |
+| E<ep>U<idx> | <1-4> | <sum_of_shot_durations>s | character:<角色名>/<form_id>, scene:<场景名>, prop:<道具名> | Shot1(<d1>s)...Shot<k>(<dk>s): <叙事文本> |
 
 ### 完整 shot 文本（供 Step 2 使用）
 
 #### E<ep>U<idx>
 
-Shot 1 (<d1>s): @<已注册名> 动作描述（不写外貌/服装）。
+Shot 1 (<d1>s): <短镜头描述>。@<已注册名> 具体动作，并加入可见表情 / 情绪反应（不写外貌/服装）。
 Shot 2 (<d2>s): ...
 ```
 
@@ -130,5 +142,5 @@ Shot 2 (<d2>s): ...
 
 - unit_id 从 `E{集数}U1` 开始按顺序递增。
 - 每 unit shots 不超过 4 个；单 unit references 不超过 Step 0 查到的 `max_reference_images`。
-- `@名称` 中的「名称」需出现在 project.json 的 characters / scenes / props 三张表之一；若确实需要新资产，报告给主 agent 要求补资产生成，不要在本 unit 中先发明。
+- `@名称` 中的「名称」需出现在 project.json 的 characters / scenes / props 三张表之一；角色 reference 的 form_id 需出现在该角色 forms 中。若确实需要新资产或新形态，报告给主 agent 要求补充，不要在本 unit 中先发明。
 - 所有 shot 时长从 Step 0 查到的 `supported_durations` 中选；优先组合使 unit 总时长贴近 `max_duration`（若 `default_duration` 非 null，单 shot 默认取其值；特殊情况另议）；不要自己发明其它时长，也不要默认挑最短值。

@@ -87,6 +87,6 @@ function resolveAssetPreviewPath(asset: Asset): string | null {
   if (!defaultForm) {
     return asset.image_path;
   }
-  const slot = defaultForm.storyboard_ref_slot || "full_body";
+  const slot = defaultForm.storyboard_ref_slot || "three_view";
   return defaultForm.refs?.[slot]?.path || defaultForm.refs?.full_body?.path || asset.image_path;
 }

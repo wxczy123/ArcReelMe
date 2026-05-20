@@ -6,10 +6,10 @@
 
 把角色资产从“一个角色一张 `character_sheet`”升级为“一个角色多个形态，每个形态固定两个输出槽位”：
 
-- `full_body`：单人全身主参考图，默认喂给分镜/宫格/参考图收集。
-- `three_view`：三视图，默认用于一致性审阅，也可由用户切换为分镜参考图。
+- `full_body`：单人全身主参考图，可由用户切换为分镜/宫格/参考图收集的默认槽位。
+- `three_view`：三视图，当前默认喂给分镜/宫格/参考生视频参考图收集；如果三视图缺失，运行时可回退同形态 `full_body`。
 - `input_refs`：用户上传的生成输入参考图，只作为生成 `full_body` / `three_view` 的输入，不作为最终角色设计图。
-- `storyboard_ref_slot`：当前形态用于分镜的默认参考槽位，默认 `full_body`。
+- `storyboard_ref_slot`：当前形态用于分镜/宫格/参考生视频的默认参考槽位，默认 `three_view`。
 
 本次不做成本估算改造。旧字段 `character_sheet` / `reference_image` 不再作为真相源；但在读写边界保留了轻量迁移：旧 `character_sheet` 会转入默认形态 `full_body`，旧 `reference_image` 会转入默认形态 `input_refs`，避免旧测试和导入包直接断裂。
 
@@ -28,7 +28,7 @@
         "default": {
           "label": "默认造型",
           "description": "常规服装和状态",
-          "storyboard_ref_slot": "full_body",
+          "storyboard_ref_slot": "three_view",
           "input_refs": [],
           "refs": {
             "full_body": {
@@ -525,3 +525,14 @@ uv run pytest tests/test_asset_fingerprints.py tests/test_version_manager_more.p
 - 新结构角色图片在 `characters/{角色}/{form_id}/full_body.png` 和 `characters/{角色}/{form_id}/three_view.png`。
 - 若回退到旧版本，需要手动选择默认形态的 `full_body` 写回旧字段 `character_sheet`。
 - `input_refs` 对应旧 `reference_image` 已变为数组；旧版本只能保留其中一张时，建议选择最主要的一张。
+
+## 2026-05-20 补充：默认参考槽位改为三视图
+
+后续工作流优化中，`storyboard_ref_slot` 的默认值已从 `full_body` 改为 `three_view`。这个字段虽然名字包含 storyboard，但实际也被宫格参考图和参考生视频参考图解析复用。
+
+变更影响：
+
+- 新建角色形态默认选择 `three_view`。
+- 前端角色卡和全局资产卡预览默认优先展示 `three_view`，缺失时回退 `full_body`。
+- 图生视频、宫格生视频、参考生视频在解析角色参考图时都会先读当前形态的 `storyboard_ref_slot`。
+- 三视图缺失时，后端 `get_storyboard_ref_path()` 会回退同形态 `full_body`，减少旧项目或未补齐三视图时的硬失败。

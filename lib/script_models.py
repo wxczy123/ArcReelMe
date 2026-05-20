@@ -197,6 +197,21 @@ class ReferenceResource(BaseModel):
 
     type: Literal["character", "scene", "prop"] = Field(description="引用的资源类型")
     name: str = Field(description="角色/场景/道具名称，必须在 project.json 对应 bucket 中已注册")
+    form_id: str | None = Field(
+        default=None,
+        description="角色形态 ID，仅 type=character 时使用；scene/prop 不填写",
+    )
+
+    @model_validator(mode="after")
+    def _validate_form_id_scope(self) -> "ReferenceResource":
+        if self.form_id is None or self.form_id == "":
+            self.form_id = None
+            return self
+        if self.type != "character":
+            raise ValueError("form_id 仅适用于 character reference")
+        if "/" in self.form_id or "\\" in self.form_id or "\0" in self.form_id or ".." in self.form_id:
+            raise ValueError(f"invalid form_id: {self.form_id!r}")
+        return self
 
 
 class ReferenceVideoUnit(BaseModel):

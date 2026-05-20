@@ -13,7 +13,17 @@ def test_build_reference_video_prompt_contains_required_sections():
         "theme": "成长",
         "world_setting": "北宋江湖",
     }
-    characters = {"主角": {"description": "少年剑客"}, "张三": {"description": "酒客"}}
+    characters = {
+        "主角": {
+            "description": "少年剑客",
+            "default_form": "default",
+            "forms": {
+                "default": {"label": "常服", "description": "青色短打"},
+                "wounded": {"label": "负伤", "description": "肩部包扎"},
+            },
+        },
+        "张三": {"description": "酒客"},
+    }
     scenes = {"酒馆": {"description": "黑木桌椅的江湖酒馆"}}
     props = {"长剑": {"description": "祖传青锋"}}
     step1_md = "| unit | 时长 | shots | references |\n| E1U1 | 8s | 2 | 主角,酒馆 |"
@@ -46,9 +56,40 @@ def test_build_reference_video_prompt_contains_required_sections():
     # schema 上下文
     assert "ReferenceVideoScript" in prompt
     assert "references" in prompt
+    assert "form_id" in prompt
+    assert "wounded" in prompt
+    assert "default_form" in prompt
     # 时长约束
     assert "5" in prompt or "8" in prompt
     assert "9" in prompt  # max_refs
+
+
+def test_build_reference_video_prompt_lists_character_forms():
+    prompt = build_reference_video_prompt(
+        project_overview={"synopsis": "s", "genre": "g", "theme": "t", "world_setting": "w"},
+        style="s",
+        style_description="d",
+        characters={
+            "苏洄": {
+                "description": "青年男性",
+                "default_form": "default",
+                "forms": {
+                    "default": {"label": "默认造型", "description": "深色大衣"},
+                    "sick": {"label": "病弱造型", "description": "病房服装"},
+                },
+            }
+        },
+        scenes={},
+        props={},
+        units_md="stub",
+        supported_durations=[8],
+        max_refs=9,
+    )
+
+    assert "苏洄" in prompt
+    assert "default_form: default" in prompt
+    assert "sick" in prompt
+    assert "character reference 必须填写 `form_id`" in prompt
 
 
 def test_build_reference_video_prompt_emphasizes_no_appearance_description():

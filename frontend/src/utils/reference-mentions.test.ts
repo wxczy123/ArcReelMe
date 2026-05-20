@@ -57,6 +57,17 @@ describe("mergeReferences", () => {
     ]);
   });
 
+  it("preserves an existing character form_id while merging", () => {
+    const existing: ReferenceResource[] = [
+      { type: "character", name: "张三", form_id: "sick" },
+    ];
+    const merged = mergeReferences("Shot 1 (3s): @张三 @酒馆", existing, project);
+    expect(merged).toEqual([
+      { type: "character", name: "张三", form_id: "sick" },
+      { type: "scene", name: "酒馆" },
+    ]);
+  });
+
   it("removes references whose names are no longer in prompt", () => {
     const existing: ReferenceResource[] = [
       { type: "character", name: "张三" },
