@@ -32,7 +32,7 @@ _TINY_PNG = (
 @pytest.fixture
 def three_bucket_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     projects_root = tmp_path / "projects"
-    projects_root.mkdir()
+    projects_root.mkdir(exist_ok=True)
     proj_dir = projects_root / "demo"
     proj_dir.mkdir()
     for sub in ("scripts", "characters", "scenes", "props"):

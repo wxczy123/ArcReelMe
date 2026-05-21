@@ -13,6 +13,8 @@ import { useUsageStore, type UsageStats, type UsageCall } from "@/stores/usage-s
 import { API } from "@/api";
 import { GlassPopover } from "@/components/ui/GlassPopover";
 import { ModalCloseButton } from "@/components/ui/ModalCloseButton";
+import { formatShortDateTime } from "@/utils/date-format";
+import { costEntries, formatCostOrZero, formatCurrencyAmount } from "@/utils/cost-format";
 import type { CallType } from "@/types/provider";
 
 // ---------------------------------------------------------------------------
@@ -85,14 +87,10 @@ export function UsageDrawer({ open, onClose, projectName, anchorRef }: UsageDraw
   }, [open, loadCalls]);
 
   const totalPages = Math.ceil(total / pageSize);
-  const costByCurrency = stats?.cost_by_currency ?? {};
-  const costParts = Object.entries(costByCurrency)
-    .filter(([, v]) => v > 0)
-    .map(
-      ([currency, amount]) =>
-        `${currency === "CNY" ? "¥" : "$"}${amount.toFixed(2)}`,
-    );
-  const costSummary = costParts.length > 0 ? costParts : ["$0.00"];
+  const costParts = costEntries(stats?.cost_by_currency).map(([currency, amount]) =>
+    formatCurrencyAmount(currency, amount),
+  );
+  const costSummary = costParts.length > 0 ? costParts : [formatCostOrZero(undefined)];
 
   return (
     <GlassPopover
@@ -255,8 +253,9 @@ export function UsageDrawer({ open, onClose, projectName, anchorRef }: UsageDraw
                         fontWeight: call.cost_amount > 0 ? 600 : 400,
                       }}
                     >
-                      {call.currency === "CNY" ? "¥" : "$"}
-                      {call.cost_amount.toFixed(4)}
+                      {formatCurrencyAmount(call.currency, call.cost_amount, {
+                        maximumFractionDigits: 6,
+                      })}
                     </span>
                   </div>
                   <div
@@ -266,17 +265,23 @@ export function UsageDrawer({ open, onClose, projectName, anchorRef }: UsageDraw
                     <span className="num truncate">{call.model}</span>
                     {call.call_type === "text" ? (
                       <>
-                        {call.input_tokens != null && (
+                        {call.usage_tokens != null ? (
                           <span className="num">
-                            {t("input_token_label")}{" "}
-                            {call.input_tokens.toLocaleString()}
+                            {call.usage_tokens.toLocaleString()} {t("tokens_suffix")}
                           </span>
-                        )}
-                        {call.output_tokens != null && (
-                          <span className="num">
-                            {t("output_token_label")}{" "}
-                            {call.output_tokens.toLocaleString()} tokens
-                          </span>
+                        ) : (
+                          <>
+                            {call.input_tokens != null && (
+                              <span className="num">
+                                {t("input_token_label")} {call.input_tokens.toLocaleString()} {t("tokens_suffix")}
+                              </span>
+                            )}
+                            {call.output_tokens != null && (
+                              <span className="num">
+                                {t("output_token_label")} {call.output_tokens.toLocaleString()} {t("tokens_suffix")}
+                              </span>
+                            )}
+                          </>
                         )}
                       </>
                     ) : (
@@ -288,7 +293,7 @@ export function UsageDrawer({ open, onClose, projectName, anchorRef }: UsageDraw
                       </>
                     )}
                     <span className="num ml-auto shrink-0">
-                      {formatDateTime(call.started_at || call.created_at)}
+                      {formatShortDateTime(call.started_at || call.created_at) ?? (call.started_at || call.created_at)}
                     </span>
                   </div>
                   {call.status === "failed" && call.error_message && (
@@ -447,15 +452,6 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
-}
-
-function formatDateTime(isoStr: string): string {
-  try {
-    const d = new Date(isoStr);
-    return `${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getDate().toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-  } catch {
-    return isoStr;
-  }
 }
 
 function extractFilename(outputPath: string | null | undefined): string {

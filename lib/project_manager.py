@@ -13,7 +13,7 @@ import shutil
 import unicodedata
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -69,6 +69,10 @@ def effective_mode(*, project: dict, episode: dict) -> str:
     if proj_mode in _VALID_GENERATION_MODES:
         return proj_mode
     return _DEFAULT_GENERATION_MODE
+
+
+class EpisodeScriptReboundError(RuntimeError):
+    """加锁前后 episode→script_file 绑定发生变化（并发 PATCH 改绑），调用方应重试。"""
 
 
 # ==================== 数据模型 ====================
@@ -437,8 +441,8 @@ class ProjectManager:
             "novel": {"title": title, "chapter": chapter},
             "scenes": [],
             "metadata": {
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
                 "total_scenes": 0,
                 "estimated_duration_seconds": 0,
                 "status": "draft",
@@ -459,9 +463,6 @@ class ProjectManager:
         Returns:
             保存的文件路径
         """
-        project_dir = self.get_project_path(project_name)
-        scripts_dir = project_dir / "scripts"
-
         if filename is not None and filename.startswith("scripts/"):
             filename = filename[len("scripts/") :]
 
@@ -469,12 +470,29 @@ class ProjectManager:
             chapter = script["novel"].get("chapter", "chapter_01")
             filename = f"{chapter.replace(' ', '_')}_script.json"
 
+        with self._script_lock(project_name, filename):
+            return self._write_script_unlocked(project_name, script, filename)
+
+    def _write_script_unlocked(self, project_name: str, script: dict, filename: str, sync_project: bool = True) -> Path:
+        """剧本写盘主体：校验 + 更新元数据 + 原子写 + 同步 project.json。
+
+        **不获取 `_script_lock`**——调用方必须已持有该锁（见 `save_script` / `locked_script`），
+        否则会丧失并发保护。独立抽出是为了避免 `locked_script` 复用 `save_script` 时二次获取
+        同一把 flock 造成同进程自死锁（与 `update_project` 内联 `atomic_write_json` 而不复用
+        `save_project` 同理）。filename 须已去除 `scripts/` 前缀且非 None。
+
+        `sync_project=False` 时跳过 `sync_episode_from_script`：该同步会经 `update_project`
+        再次获取 `_project_lock`，故已持有项目锁的调用方（见 `locked_episode_script`）须传 False
+        以免同进程自死锁。仅写脚本内容、不改 episode 元数据的场景跳过同步无副作用。
+        """
+        scripts_dir = self.get_project_path(project_name) / "scripts"
+
         # 先做 filename/内部 episode 一致性校验，避免写盘后才在 sync 阶段抛错，
         # 造成"脚本文件已落盘、project.json 未同步"的部分提交（codex 指出的原子性缺口）。
         self._require_filename_episode_consistency(script, filename)
 
         # 更新元数据（兼容旧脚本：可能缺少 metadata，或 narration 使用 segments）
-        now = datetime.now().isoformat()
+        now = datetime.now(UTC).isoformat()
         metadata = script.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
@@ -508,16 +526,16 @@ class ProjectManager:
         total_duration = sum(item.get("duration_seconds", default_duration) for item in items)
         metadata["estimated_duration_seconds"] = total_duration
 
-        # 保存文件（含路径遍历防护）+ 文件锁 + 原子写，避免并发 PATCH 导致 JSON 损坏
+        # 保存文件（含路径遍历防护）+ 原子写，避免并发 PATCH 导致 JSON 损坏
         real = self._safe_subpath(scripts_dir, filename)
         output_path = Path(real)
 
-        with self._script_lock(project_name, filename):
-            atomic_write_json(output_path, script)
+        atomic_write_json(output_path, script)
 
-            # 在同一把锁内同步到 project.json，保证 script 写入与元数据同步是单一事务
-            if self.project_exists(project_name) and isinstance(script.get("episode"), int):
-                self.sync_episode_from_script(project_name, filename)
+        # 同步到 project.json，保证 script 写入与元数据同步是单一事务
+        # （sync 走的是 `_project_lock`，与外层 `_script_lock` 不同锁，不会冲突）。
+        if sync_project and self.project_exists(project_name) and isinstance(script.get("episode"), int):
+            self.sync_episode_from_script(project_name, filename)
 
         emit_project_change_hint(
             project_name,
@@ -525,6 +543,64 @@ class ProjectManager:
         )
 
         return output_path
+
+    @contextmanager
+    def locked_script(self, project_name: str, script_filename: str):
+        """在单一 `_script_lock` 内完成剧本的 load → mutate → save 读-改-写。
+
+        yield 出剧本字典供调用方就地修改；正常退出时写回，with 体内抛异常（如目标 scene/unit
+        未找到）则跳过写回、照常释放锁。与 `update_project` 对称，消除"读改写之间被并发写覆盖"
+        的 lost-update 竞态。
+        """
+        norm = script_filename[len("scripts/") :] if script_filename.startswith("scripts/") else script_filename
+        with self._script_lock(project_name, norm):
+            script = self.load_script(project_name, norm)
+            yield script
+            self._write_script_unlocked(project_name, script, norm)
+
+    def _read_project_raw_unlocked(self, project_name: str) -> dict:
+        """裸读 project.json（不取锁、不迁移）。仅供已持 `_project_lock` 的复核调用。"""
+        project_file = self._get_project_file_path(project_name)
+        with open(project_file, encoding="utf-8") as f:  # noqa: PTH123
+            return json.load(f)
+
+    @contextmanager
+    def locked_episode_script(self, project_name: str, resolve_script_file: Callable[[dict], str]):
+        """统一「脚本锁 → 项目锁」顺序下，解析 episode→script_file 并对剧本做读-改-写。
+
+        `resolve_script_file(project) -> script_file`：调用方提供的解析器，从 project.json
+        找到目标 episode、做校验、返回其绑定的脚本文件名（可自行抛异常，如 404/409）。
+
+        解析候选 → 加锁 → 复核绑定 → 写入全程在持 `_project_lock` 的临界区内完成，消除
+        「锁外读 script_file 后被并发 PATCH 改绑、写入落到旧脚本」的 TOCTOU。锁获取顺序与
+        worker 回写（`locked_script` → sync）保持一致的 脚本锁 → 项目锁，避免 ABBA 死锁。
+
+        写脚本经 `sync_project=False` 跳过 `_write_script_unlocked` 内会二次取项目锁的 sync
+        （避免同进程自死锁）；改在已持有的项目锁内联完成集元数据同步与 project.json 写回，
+        与旧 `locked_script` → sync 路径行为一致（刷新 episodes 元数据与 `updated_at`）。
+
+        若加锁前后绑定指向了不同脚本（并发改绑），抛 `EpisodeScriptReboundError` 让调用方重试。
+        """
+        candidate = resolve_script_file(self.load_project(project_name))
+        norm = candidate[len("scripts/") :] if candidate.startswith("scripts/") else candidate
+        with self._script_lock(project_name, norm):
+            with self._project_lock(project_name):
+                project = self._read_project_raw_unlocked(project_name)
+                current = resolve_script_file(project)
+                cur_norm = current[len("scripts/") :] if current.startswith("scripts/") else current
+                if cur_norm != norm:
+                    raise EpisodeScriptReboundError(f"episode script binding changed: {norm} -> {cur_norm}")
+                script = self.load_script(project_name, norm)
+                yield script
+                self._write_script_unlocked(project_name, script, norm, sync_project=False)
+                # 在已持项目锁内联同步 project.json（等价 update_project 写路径，但不二次取锁）
+                if isinstance(script.get("episode"), int):
+                    self._apply_episode_sync(project, script, norm)
+                self._migrate_legacy_resolution_on_save(project)
+                self._migrate_legacy_style(project)
+                self._touch_metadata(project)
+                atomic_write_json(self._get_project_file_path(project_name), project)
+                emit_project_change_hint(project_name, changed_paths=[self.PROJECT_FILE])
 
     @staticmethod
     def _require_filename_episode_consistency(script: dict, script_filename: str) -> None:
@@ -582,8 +658,16 @@ class ProjectManager:
                 错写为 episode=1，会覆盖第 1 集）。
         """
         script = self.load_script(project_name, script_filename)
-        project = self.load_project(project_name)
+        return self.update_project(
+            project_name, lambda project: self._apply_episode_sync(project, script, script_filename)
+        )
 
+    def _apply_episode_sync(self, project: dict, script: dict, script_filename: str) -> None:
+        """把剧本的集号/标题/script_file 同步进 `project`（就地修改，不取锁、不写盘）。
+
+        供 `sync_episode_from_script`（在 `update_project` 锁内）与 `locked_episode_script`
+        （在已持 `_project_lock` 的临界区内）共用，避免重复实现集元数据同步逻辑。
+        """
         base_name = script_filename[len("scripts/") :] if script_filename.startswith("scripts/") else script_filename
         # 防御纵深：SSE 扫描路径直接调用此函数（不经 save_script），同样需要校验
         self._require_filename_episode_consistency(script, base_name)
@@ -597,24 +681,18 @@ class ProjectManager:
         episode_title = script.get("title", "")
         script_file = f"scripts/{base_name}"
 
-        # 查找或创建 episode 条目
+        # 查找或创建 episode 条目（整段 RMW 在单一 _project_lock 内完成，避免并发同步丢失）
         episodes = project.setdefault("episodes", [])
         episode_entry: dict[str, Any] | None = next((ep for ep in episodes if ep["episode"] == episode_num), None)
-
         if episode_entry is None:
             episode_entry = {"episode": episode_num}
             episodes.append(episode_entry)
-
         # 同步核心元数据（不包含统计字段，统计字段由 StatusCalculator 读时计算）
         episode_entry["title"] = episode_title
         episode_entry["script_file"] = script_file
-
-        # 排序并保存
         episodes.sort(key=lambda x: x["episode"])
-        self.save_project(project_name, project)
 
         logger.info("已同步剧集信息: Episode %d - %s", episode_num, episode_title)
-        return project
 
     def load_script(self, project_name: str, filename: str) -> dict:
         """
@@ -648,13 +726,11 @@ class ProjectManager:
 
     def update_character_sheet(self, project_name: str, script_filename: str, name: str, sheet_path: str) -> dict:
         """更新角色设计图路径"""
-        script = self.load_script(project_name, script_filename)
-
-        if name not in script["characters"]:
-            raise KeyError(f"角色 '{name}' 不存在")
-
-        script["characters"][name]["character_sheet"] = sheet_path
-        self.save_script(project_name, script, script_filename)
+        with self.locked_script(project_name, script_filename) as script:
+            if name not in script["characters"]:
+                # 在锁内抛出，locked_script 跳过写回
+                raise KeyError(f"角色 '{name}' 不存在")
+            script["characters"][name]["character_sheet"] = sheet_path
         return script
 
     # ==================== 数据结构标准化 ====================
@@ -872,8 +948,8 @@ class ProjectManager:
 
         if "metadata" not in script:
             script["metadata"] = {
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
                 "total_scenes": 0,
                 "estimated_duration_seconds": 0,
                 "status": "draft",
@@ -908,23 +984,21 @@ class ProjectManager:
         Returns:
             更新后的剧本
         """
-        script = self.load_script(project_name, script_filename)
+        with self.locked_script(project_name, script_filename) as script:
+            # 自动生成场景 ID
+            existing_ids = [s["scene_id"] for s in script["scenes"]]
+            next_id = f"{len(existing_ids) + 1:03d}"
+            scene["scene_id"] = next_id
 
-        # 自动生成场景 ID
-        existing_ids = [s["scene_id"] for s in script["scenes"]]
-        next_id = f"{len(existing_ids) + 1:03d}"
-        scene["scene_id"] = next_id
+            # 确保有 generated_assets 字段
+            if "generated_assets" not in scene:
+                scene["generated_assets"] = {
+                    "storyboard_image": None,
+                    "video_clip": None,
+                    "status": "pending",
+                }
 
-        # 确保有 generated_assets 字段
-        if "generated_assets" not in scene:
-            scene["generated_assets"] = {
-                "storyboard_image": None,
-                "video_clip": None,
-                "status": "pending",
-            }
-
-        script["scenes"].append(scene)
-        self.save_script(project_name, script, script_filename)
+            script["scenes"].append(scene)
         return script
 
     def update_scene_asset(
@@ -948,38 +1022,37 @@ class ProjectManager:
         Returns:
             更新后的剧本
         """
-        script = self.load_script(project_name, script_filename)
+        with self.locked_script(project_name, script_filename) as script:
+            # 根据内容模式选择正确的数据结构
+            content_mode = script.get("content_mode", "narration")
+            if content_mode == "narration" and "segments" in script:
+                items = script["segments"]
+                id_field = "segment_id"
+            else:
+                items = script.get("scenes", [])
+                id_field = "scene_id"
 
-        # 根据内容模式选择正确的数据结构
-        content_mode = script.get("content_mode", "narration")
-        if content_mode == "narration" and "segments" in script:
-            items = script["segments"]
-            id_field = "segment_id"
-        else:
-            items = script.get("scenes", [])
-            id_field = "scene_id"
+            for item in items:
+                if str(item.get(id_field)) == str(scene_id):
+                    assets = item.get("generated_assets")
+                    if not isinstance(assets, dict):
+                        assets = {}
+                        item["generated_assets"] = assets
 
-        for item in items:
-            if str(item.get(id_field)) == str(scene_id):
-                assets = item.get("generated_assets")
-                if not isinstance(assets, dict):
-                    assets = {}
-                    item["generated_assets"] = assets
+                    assets_template = self.create_generated_assets(content_mode)
+                    for key, default_value in assets_template.items():
+                        if key not in assets:
+                            assets[key] = default_value
 
-                assets_template = self.create_generated_assets(content_mode)
-                for key, default_value in assets_template.items():
-                    if key not in assets:
-                        assets[key] = default_value
+                    assets[asset_type] = asset_path
 
-                assets[asset_type] = asset_path
-
-                # 使用 update_scene_status 更新状态
-                self.update_scene_status(item)
-
-                self.save_script(project_name, script, script_filename)
-                return script
-
-        raise KeyError(f"场景 '{scene_id}' 不存在")
+                    # 使用 update_scene_status 更新状态
+                    self.update_scene_status(item)
+                    break
+            else:
+                # 未命中：在锁内抛出，locked_script 跳过写回
+                raise KeyError(f"场景 '{scene_id}' 不存在")
+        return script
 
     def batch_update_scene_assets(
         self,
@@ -1000,38 +1073,35 @@ class ProjectManager:
         if not updates:
             return {}
 
-        script = self.load_script(project_name, script_filename)
+        with self.locked_script(project_name, script_filename) as script:
+            content_mode = script.get("content_mode", "narration")
+            if content_mode == "narration" and "segments" in script:
+                items = script["segments"]
+                id_field = "segment_id"
+            else:
+                items = script.get("scenes", [])
+                id_field = "scene_id"
 
-        content_mode = script.get("content_mode", "narration")
-        if content_mode == "narration" and "segments" in script:
-            items = script["segments"]
-            id_field = "segment_id"
-        else:
-            items = script.get("scenes", [])
-            id_field = "scene_id"
+            # 建立 scene_id → item 索引，避免 O(N*M) 查找
+            item_by_id: dict[str, dict] = {str(item.get(id_field)): item for item in items}
 
-        # 建立 scene_id → item 索引，避免 O(N*M) 查找
-        item_by_id: dict[str, dict] = {str(item.get(id_field)): item for item in items}
+            for scene_id, asset_type, asset_path in updates:
+                item = item_by_id.get(str(scene_id))
+                if item is None:
+                    continue
 
-        for scene_id, asset_type, asset_path in updates:
-            item = item_by_id.get(str(scene_id))
-            if item is None:
-                continue
+                assets = item.get("generated_assets")
+                if not isinstance(assets, dict):
+                    assets = {}
+                    item["generated_assets"] = assets
 
-            assets = item.get("generated_assets")
-            if not isinstance(assets, dict):
-                assets = {}
-                item["generated_assets"] = assets
+                assets_template = self.create_generated_assets(content_mode)
+                for key, default_value in assets_template.items():
+                    if key not in assets:
+                        assets[key] = default_value
 
-            assets_template = self.create_generated_assets(content_mode)
-            for key, default_value in assets_template.items():
-                if key not in assets:
-                    assets[key] = default_value
-
-            assets[asset_type] = asset_path
-            self.update_scene_status(item)
-
-        self.save_script(project_name, script, script_filename)
+                assets[asset_type] = asset_path
+                self.update_scene_status(item)
         return script
 
     def get_pending_scenes(self, project_name: str, script_filename: str, asset_type: str) -> list[dict]:
@@ -1247,14 +1317,20 @@ class ProjectManager:
         self,
         project_name: str,
         mutate_fn: Callable[[dict], None],
-    ) -> Path:
+    ) -> dict:
         """原子性地更新 project.json：加文件锁 → 读 → 修改 → 原子写回。
 
         避免并发任务（如同时生成多张角色图片）之间的 lost-update 竞态。
+        在同一持锁窗口内统一应用读时迁移（_migrate_legacy_style），并在锁外应用
+        内存映射升级（_lazy_upgrade_image_provider），返回迁移后的项目元数据 dict，
+        调用方无需再 load_project 一次。
 
         Args:
             project_name: 项目名称
             mutate_fn: 接收 project dict 并就地修改的回调函数
+
+        Returns:
+            迁移后的项目元数据字典（与 load_project 返回结构一致）
         """
         project_file = self._get_project_file_path(project_name)
 
@@ -1263,6 +1339,7 @@ class ProjectManager:
                 project = json.load(f)
             mutate_fn(project)
             self._migrate_legacy_resolution_on_save(project)
+            self._migrate_legacy_style(project)
             self._touch_metadata(project)
             atomic_write_json(project_file, project)
 
@@ -1271,11 +1348,12 @@ class ProjectManager:
             changed_paths=[self.PROJECT_FILE],
         )
 
-        return project_file
+        self._lazy_upgrade_image_provider(project)
+        return project
 
     @staticmethod
     def _touch_metadata(project: dict) -> None:
-        now = datetime.now().isoformat()
+        now = datetime.now(UTC).isoformat()
         if "metadata" not in project:
             project["metadata"] = {"created_at": now, "updated_at": now}
         else:
@@ -1342,8 +1420,8 @@ class ProjectManager:
             "scenes": {},
             "props": {},
             "metadata": {
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             },
         }
         if default_duration is not None:
@@ -1369,24 +1447,19 @@ class ProjectManager:
         Returns:
             更新后的项目元数据
         """
-        project = self.load_project(project_name)
 
-        # 检查是否已存在
-        for ep in project["episodes"]:
-            if ep["episode"] == episode:
-                ep["title"] = title
-                ep["script_file"] = script_file
-                self.save_project(project_name, project)
-                return project
+        def _mutate(project: dict) -> None:
+            # 已存在则更新，否则追加（整段 RMW 在单一 _project_lock 内完成）
+            for ep in project["episodes"]:
+                if ep["episode"] == episode:
+                    ep["title"] = title
+                    ep["script_file"] = script_file
+                    return
+            # 添加新剧集（不包含统计字段，由 StatusCalculator 读时计算）
+            project["episodes"].append({"episode": episode, "title": title, "script_file": script_file})
+            project["episodes"].sort(key=lambda x: x["episode"])
 
-        # 添加新剧集（不包含统计字段，由 StatusCalculator 读时计算）
-        project["episodes"].append({"episode": episode, "title": title, "script_file": script_file})
-
-        # 按集数排序
-        project["episodes"].sort(key=lambda x: x["episode"])
-
-        self.save_project(project_name, project)
-        return project
+        return self.update_project(project_name, _mutate)
 
     def sync_project_status(self, project_name: str) -> dict:
         """
@@ -1481,8 +1554,7 @@ class ProjectManager:
                 raise KeyError(f"{spec.label_zh} '{name}' 不存在")
             bucket[name][spec.sheet_field] = sheet_path
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def _ensure_character_entry_forms(self, project: dict, name: str) -> dict:
         bucket = project.get("characters")
@@ -1541,16 +1613,15 @@ class ProjectManager:
         Returns:
             更新后的项目元数据
         """
-        project = self.load_project(project_name)
 
-        project["characters"][name] = {
-            **make_character_entry(description, {"voice_style": voice_style or ""}),
-        }
-        if character_sheet:
-            set_ref_path(project["characters"][name], DEFAULT_FORM_ID, "full_body", character_sheet)
+        def _mutate(project: dict) -> None:
+            project.setdefault("characters", {})[name] = {
+                **make_character_entry(description, {"voice_style": voice_style or ""}),
+            }
+            if character_sheet:
+                set_ref_path(project["characters"][name], DEFAULT_FORM_ID, "full_body", character_sheet)
 
-        self.save_project(project_name, project)
-        return project
+        return self.update_project(project_name, _mutate)
 
     def update_project_character_sheet(self, project_name: str, name: str, sheet_path: str) -> dict:
         """更新项目级角色默认形态全身图路径（旧接口保留给上传入口调用）。"""
@@ -1559,8 +1630,7 @@ class ProjectManager:
             entry = self._ensure_character_entry_forms(project, name)
             set_ref_path(entry, entry.get("default_form") or DEFAULT_FORM_ID, "full_body", sheet_path)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def update_character_reference_image(self, project_name: str, char_name: str, ref_path: str) -> dict:
         """更新角色默认形态输入参考图（旧接口保留给上传入口调用）。"""
@@ -1585,8 +1655,7 @@ class ProjectManager:
                 raise ValueError(f"角色形态已存在: {form_id}")
             forms[form_id] = make_default_form(description, label=label or form_id)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def update_character_form(
         self,
@@ -1613,8 +1682,7 @@ class ProjectManager:
             if storyboard_ref_slot is not None:
                 form["storyboard_ref_slot"] = validate_ref_slot(storyboard_ref_slot)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def delete_character_form(self, project_name: str, char_name: str, form_id: str) -> dict:
         """删除角色形态。默认形态不可删。"""
@@ -1629,8 +1697,7 @@ class ProjectManager:
                 raise KeyError(form_id)
             del entry["forms"][form_id]
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def update_character_default_form(self, project_name: str, char_name: str, form_id: str) -> dict:
         """更新角色默认形态。"""
@@ -1642,8 +1709,7 @@ class ProjectManager:
                 raise KeyError(form_id)
             entry["default_form"] = form_id
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def _assert_character_form_not_used(self, project_name: str, char_name: str, form_id: str) -> None:
         """删除形态前扫描 scripts，避免留下悬空引用。"""
@@ -1675,8 +1741,7 @@ class ProjectManager:
             entry = self._ensure_character_entry_forms(project, char_name)
             set_ref_path(entry, form_id, slot, ref_path)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def add_character_input_ref(self, project_name: str, char_name: str, form_id: str, ref_path: str) -> dict:
         """追加角色某形态的生成输入参考图。"""
@@ -1690,8 +1755,7 @@ class ProjectManager:
             if ref_path not in refs:
                 refs.append(ref_path)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def remove_character_input_ref(self, project_name: str, char_name: str, form_id: str, ref_path: str) -> dict:
         """删除角色某形态的生成输入参考图。"""
@@ -1706,8 +1770,7 @@ class ProjectManager:
             if ref_path in refs:
                 refs.remove(ref_path)
 
-        self.update_project(project_name, _mutate)
-        return self.load_project(project_name)
+        return self.update_project(project_name, _mutate)
 
     def get_project_character(self, project_name: str, name: str) -> dict:
         """获取项目级角色定义"""
@@ -1961,12 +2024,13 @@ class ProjectManager:
         # 解析并验证响应
         overview = ProjectOverview.model_validate_json(response_text)
         overview_dict = overview.model_dump()
-        overview_dict["generated_at"] = datetime.now().isoformat()
+        overview_dict["generated_at"] = datetime.now(UTC).isoformat()
 
-        # 保存到 project.json
-        project = self.load_project(project_name)
-        project["overview"] = overview_dict
-        self.save_project(project_name, project)
+        # 保存到 project.json（RMW 在单一 _project_lock 内完成，避免并发覆盖其它字段）
+        def _mutate(project: dict) -> None:
+            project["overview"] = overview_dict
+
+        self.update_project(project_name, _mutate)
 
         logger.info("项目概述已生成并保存")
         return overview_dict

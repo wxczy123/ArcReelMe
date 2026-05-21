@@ -30,7 +30,6 @@ import { mergeReferences } from "@/utils/reference-mentions";
 import type {
   ReferenceResource,
   ReferenceVideoUnit,
-  TaskStatus,
   UnitStatus,
 } from "@/types";
 
@@ -113,27 +112,6 @@ export function ReferenceVideoCanvas({
 
   // Optimistic UI: POST 前置位 → 队列接力 → 队列窗口换出后失效。
   const [optimisticUnitIds, setOptimisticUnitIds] = useState<Set<string>>(() => new Set());
-
-  // Toast on transition into failed (prev !== failed && next === failed).
-  const prevTaskStatusRef = useRef<Map<string, TaskStatus>>(new Map());
-  useEffect(() => {
-    const prev = prevTaskStatusRef.current;
-    const next = new Map<string, TaskStatus>();
-    for (const tk of relevantTasks) {
-      const before = prev.get(tk.task_id);
-      if (tk.status === "failed" && before !== undefined && before !== "failed") {
-        useAppStore.getState().pushNotification(
-          t("reference_generation_task_failed", {
-            unitId: tk.resource_id,
-            reason: tk.error_message ?? t("reference_status_failed"),
-          }),
-          "error",
-        );
-      }
-      next.set(tk.task_id, tk.status);
-    }
-    prevTaskStatusRef.current = next;
-  }, [relevantTasks, t]);
 
   const tasksByUnit = useMemo(() => {
     const map = new Map<string, (typeof relevantTasks)[number]>();
@@ -346,6 +324,35 @@ export function ReferenceVideoCanvas({
     setLastProject(projectName);
     setTab("units");
   }
+
+  // 通知回跳：收到 reference_unit scroll target 时切到 units tab 并选中对应 unit
+  // （镜像 ShotSplitView 的选择式回跳）。units 异步加载，靠依赖变化重试到命中或过期。
+  const scrollTarget = useAppStore((s) => s.scrollTarget);
+  const clearScrollTarget = useAppStore((s) => s.clearScrollTarget);
+  useEffect(() => {
+    if (scrollTarget?.type !== "reference_unit") return;
+    const requestId = scrollTarget.request_id;
+    if (units.some((u) => u.unit_id === scrollTarget.id)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 订阅通知 store，触发后切 tab + 选中
+      setTab("units");
+      select(scrollTarget.id);
+      clearScrollTarget(requestId);
+      return;
+    }
+    // units 加载中：等待，不安排过期清理——否则慢网/冷启动下 loadUnits 尚未返回就
+    // 到期，target 会被提前清除，units 到达也无法再选中目标 unit。
+    if (loading) return;
+    // 加载完成仍未命中：挂一个到 expires_at 的一次性兜底清理，避免此后 units/loading
+    // 都不再变化时 effect 不再重跑、过期 target 永久残留 store。units 若晚到会触发
+    // 依赖变化、重跑本 effect 并清掉该定时器。
+    const remaining = scrollTarget.expires_at - Date.now();
+    if (remaining <= 0) {
+      clearScrollTarget(requestId);
+      return;
+    }
+    const timer = setTimeout(() => clearScrollTarget(requestId), remaining);
+    return () => clearTimeout(timer);
+  }, [scrollTarget, units, loading, select, clearScrollTarget]);
 
   const preprocStatus: "loading" | "error" | "empty" | "ready" = loading
     ? "loading"

@@ -123,6 +123,8 @@ class UsageRepository(BaseRepository):
         image_output_tokens: int | None = None,
         text_input_tokens: int | None = None,
         text_output_tokens: int | None = None,
+        cost_amount: float | None = None,
+        currency: str | None = None,
     ) -> None:
         finished_at = utc_now()
 
@@ -141,9 +143,9 @@ class UsageRepository(BaseRepository):
         except (ValueError, TypeError):
             duration_ms = 0
 
-        # Calculate cost (failed = 0)
-        cost_amount = 0.0
-        currency = row.currency or "USD"
+        # Calculate cost. Explicit cost input is treated as provider-reported billing data.
+        final_cost_amount = 0.0
+        final_currency = row.currency or "USD"
         effective_provider = row.provider or PROVIDER_GEMINI
 
         # Pre-query custom provider pricing (avoids sync-over-async in CostCalculator)
@@ -169,8 +171,11 @@ class UsageRepository(BaseRepository):
             input_tokens = (image_input_tokens or 0) + (text_input_tokens or 0)
             output_tokens = (image_output_tokens or 0) + (text_output_tokens or 0)
 
-        if status == "success":
-            cost_amount, currency = cost_calculator.calculate_cost(
+        if cost_amount is not None:
+            final_cost_amount = cost_amount
+            final_currency = currency or row.currency or "USD"
+        elif status == "success":
+            final_cost_amount, final_currency = cost_calculator.calculate_cost(
                 provider=effective_provider,
                 call_type=row.call_type,  # type: ignore[arg-type]
                 model=row.model,
@@ -202,8 +207,8 @@ class UsageRepository(BaseRepository):
                 finished_at=finished_at,
                 duration_ms=duration_ms,
                 retry_count=retry_count,
-                cost_amount=cost_amount,
-                currency=currency,
+                cost_amount=final_cost_amount,
+                currency=final_currency,
                 usage_tokens=usage_tokens,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -262,9 +267,18 @@ class UsageRepository(BaseRepository):
         # Main aggregation query
         main_stmt = (
             select(
-                func.coalesce(func.sum(case((ApiCall.currency == "USD", ApiCall.cost_amount), else_=0)), 0).label(
-                    "total_cost_usd"
-                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (ApiCall.status == "success") & (ApiCall.currency == "USD") & (ApiCall.cost_amount > 0),
+                                ApiCall.cost_amount,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("total_cost_usd"),
                 func.count(case((ApiCall.call_type == "image", 1))).label("image_count"),
                 func.count(case((ApiCall.call_type == "video", 1))).label("video_count"),
                 func.count(case((ApiCall.call_type == "text", 1))).label("text_count"),
@@ -277,14 +291,19 @@ class UsageRepository(BaseRepository):
         main_stmt = self._scope_query(main_stmt, ApiCall)
         row = (await self.session.execute(main_stmt)).one()
 
-        # Cost by currency
+        # Cost by currency mirrors project cost estimates: only successful billed calls count.
         currency_stmt = (
             select(
                 ApiCall.currency,
                 func.coalesce(func.sum(ApiCall.cost_amount), 0).label("total"),
             )
             .select_from(ApiCall)
-            .where(*filters)
+            .where(
+                *filters,
+                ApiCall.status == "success",
+                ApiCall.cost_amount > 0,
+                ApiCall.currency.isnot(None),
+            )
             .group_by(ApiCall.currency)
         )
         currency_stmt = self._scope_query(currency_stmt, ApiCall)
@@ -323,9 +342,18 @@ class UsageRepository(BaseRepository):
                 ApiCall.call_type,
                 func.count().label("total_calls"),
                 func.count(case((ApiCall.status == "success", 1))).label("success_calls"),
-                func.coalesce(func.sum(case((ApiCall.currency == "USD", ApiCall.cost_amount), else_=0)), 0).label(
-                    "total_cost_usd"
-                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (ApiCall.status == "success") & (ApiCall.currency == "USD") & (ApiCall.cost_amount > 0),
+                                ApiCall.cost_amount,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("total_cost_usd"),
                 func.coalesce(func.sum(ApiCall.duration_ms), 0).label("total_duration_ms"),
             )
             .select_from(ApiCall)
@@ -336,6 +364,28 @@ class UsageRepository(BaseRepository):
         stmt = self._scope_query(stmt, ApiCall)
         rows = (await self.session.execute(stmt)).all()
 
+        currency_stmt = (
+            select(
+                ApiCall.provider,
+                ApiCall.call_type,
+                ApiCall.currency,
+                func.coalesce(func.sum(ApiCall.cost_amount), 0).label("total"),
+            )
+            .select_from(ApiCall)
+            .where(
+                *filters,
+                ApiCall.status == "success",
+                ApiCall.cost_amount > 0,
+                ApiCall.currency.isnot(None),
+            )
+            .group_by(ApiCall.provider, ApiCall.call_type, ApiCall.currency)
+        )
+        currency_stmt = self._scope_query(currency_stmt, ApiCall)
+        currency_rows = (await self.session.execute(currency_stmt)).all()
+        cost_by_group: dict[tuple[str | None, str | None], dict[str, float]] = {}
+        for provider_value, call_type_value, currency, total in currency_rows:
+            cost_by_group.setdefault((provider_value, call_type_value), {})[currency] = round(total, 4)
+
         stats = [
             {
                 "provider": row.provider,
@@ -343,6 +393,7 @@ class UsageRepository(BaseRepository):
                 "total_calls": row.total_calls,
                 "success_calls": row.success_calls,
                 "total_cost_usd": round(row.total_cost_usd, 4),
+                "cost_by_currency": cost_by_group.get((row.provider, row.call_type), {}),
                 "total_duration_seconds": round(row.total_duration_ms / 1000, 1) if row.total_duration_ms else 0,
             }
             for row in rows

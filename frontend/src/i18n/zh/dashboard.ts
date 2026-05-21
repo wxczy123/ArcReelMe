@@ -86,6 +86,11 @@ export default {
   'about_load_failed': '加载版本信息失败',
   'about_published_at': '发布时间：{{date}}',
   'about_checked_at': '最近检查：{{date}}',
+  'diagnostics_section_title': '诊断日志',
+  'diagnostics_section_desc': '打包最近 7 天的日志与系统信息（已脱敏 API 密钥），用于反馈 bug。',
+  'diagnostics_download': '下载诊断日志',
+  'diagnostics_downloading': '打包中…',
+  'diagnostics_download_failed': '下载失败：{{error}}',
   'config_issues': '配置问题',
   'config_issues_hint': '当前配置存在以下问题，可能会影响部分功能：',
   'arcreel_agent': '[[brand]] 智能体',
@@ -477,6 +482,7 @@ export default {
   'save_failed': '保存失败: {{message}}',
 
   // UsageStatsSection
+  'spend_ledger': '费用账本',
   'last_7_days': '最近 7 天',
   'last_30_days': '最近 30 天',
   'all': '全部',
@@ -484,6 +490,7 @@ export default {
   'filter_by_provider': '按供应商筛选',
   'all_providers': '全部供应商',
   'no_data': '暂无数据',
+  'total_calls': '总调用',
   'calls': '调用',
   'success_count': '成功',
   'success_rate': '成功率',
@@ -568,6 +575,12 @@ export default {
   'reference_generate_deduped': '该 Unit 已在队列中',
   'reference_generate_request_failed': '生成请求失败：{{error}}，请稍后重试',
   'reference_generation_task_failed': 'Unit {{unitId}} 生成失败：{{reason}}，请稍后重试',
+  'storyboard_task_failed': '分镜 "{{id}}" 生成失败：{{reason}}',
+  'video_task_failed': '视频 "{{id}}" 生成失败：{{reason}}',
+  'character_task_failed': '角色 "{{id}}" 生成失败：{{reason}}',
+  'scene_task_failed': '场景 "{{id}}" 生成失败：{{reason}}',
+  'prop_task_failed': '道具 "{{id}}" 生成失败：{{reason}}',
+  'grid_task_failed': '宫格生成失败：{{reason}}',
   'episode_mode_switcher_label': '集级生成模式',
   'episode_mode_inherit_from_project': '继承项目设置',
   'episode_mode_switch_keep_data': '切换模式不会删除已生成的 units / scenes，可随时切回原模式继续。',
@@ -769,6 +782,7 @@ export default {
   'no_call_records': '暂无调用记录',
   'input_token_label': '输入',
   'output_token_label': '输出',
+  'tokens_suffix': 'tokens',
   'records_count': '{{count}} 条记录',
 
   // WorkspaceNotificationsDrawer

@@ -86,6 +86,11 @@ export default {
   'about_load_failed': 'Tải thông tin phiên bản thất bại',
   'about_published_at': 'Phát hành: {{date}}',
   'about_checked_at': 'Kiểm tra lần cuối: {{date}}',
+  'diagnostics_section_title': 'Nhật ký chẩn đoán',
+  'diagnostics_section_desc': 'Đóng gói nhật ký 7 ngày gần nhất và thông tin hệ thống (API key đã ẩn) để báo lỗi.',
+  'diagnostics_download': 'Tải nhật ký chẩn đoán',
+  'diagnostics_downloading': 'Đang đóng gói…',
+  'diagnostics_download_failed': 'Tải về thất bại: {{error}}',
   'config_issues': 'Vấn đề cấu hình',
   'config_issues_hint': 'Phát hiện các vấn đề sau trong cấu hình hiện tại, có thể ảnh hưởng tới chức năng:',
   'arcreel_agent': '[[brand]] Agent',
@@ -456,6 +461,7 @@ export default {
   'save_failed': 'Lưu thất bại: {{message}}',
 
   // UsageStatsSection
+  'spend_ledger': 'Sổ chi phí',
   'last_7_days': '7 ngày qua',
   'last_30_days': '30 ngày qua',
   'all': 'Tất cả',
@@ -463,6 +469,7 @@ export default {
   'filter_by_provider': 'Lọc theo nhà cung cấp',
   'all_providers': 'Tất cả nhà cung cấp',
   'no_data': 'Chưa có dữ liệu',
+  'total_calls': 'Tổng lượt gọi',
   'calls': 'Lượt gọi',
   'success_count': 'Thành công',
   'success_rate': 'Tỉ lệ thành công',
@@ -544,6 +551,12 @@ export default {
   'reference_generate_deduped': 'Đã có trong hàng đợi',
   'reference_generate_request_failed': 'Yêu cầu tạo thất bại: {{error}}; vui lòng thử lại.',
   'reference_generation_task_failed': 'Tạo đơn vị {{unitId}} thất bại: {{reason}}; vui lòng thử lại.',
+  'storyboard_task_failed': 'Tạo phân cảnh "{{id}}" thất bại: {{reason}}',
+  'video_task_failed': 'Tạo video "{{id}}" thất bại: {{reason}}',
+  'character_task_failed': 'Tạo nhân vật "{{id}}" thất bại: {{reason}}',
+  'scene_task_failed': 'Tạo cảnh "{{id}}" thất bại: {{reason}}',
+  'prop_task_failed': 'Tạo đạo cụ "{{id}}" thất bại: {{reason}}',
+  'grid_task_failed': 'Tạo lưới thất bại: {{reason}}',
   'episode_mode_switcher_label': 'Chế độ tạo của tập',
   'episode_mode_inherit_from_project': 'Kế thừa từ dự án',
   'episode_mode_switch_keep_data': "Chuyển chế độ sẽ không xóa các đơn vị / cảnh hiện có — bạn có thể chuyển lại bất cứ lúc nào.",
@@ -745,6 +758,7 @@ export default {
   'no_call_records': 'Chưa có bản ghi cuộc gọi',
   'input_token_label': 'Đầu vào',
   'output_token_label': 'Đầu ra',
+  'tokens_suffix': 'token',
   'records_count': '{{count}} bản ghi',
 
   // WorkspaceNotificationsDrawer

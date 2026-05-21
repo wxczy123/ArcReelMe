@@ -106,8 +106,8 @@ def _profile_env(monkeypatch, tmp_path):
     # 不撞 FileExistsError；那些测试自己会构造完整 profile 内容。
     (profile_dir / "CLAUDE.md").write_text("")
     monkeypatch.setenv("ARCREEL_PROFILE_DIR", str(profile_dir))
+    monkeypatch.setenv("AUTH_ENABLED", "true")
     data_dir = tmp_path / "projects"
-    data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ARCREEL_DATA_DIR", str(data_dir))
     from lib.app_data_dir import _reset_for_tests
 

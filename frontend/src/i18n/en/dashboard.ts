@@ -85,6 +85,11 @@ export default {
   'about_load_failed': 'Failed to load version info',
   'about_published_at': 'Published: {{date}}',
   'about_checked_at': 'Last checked: {{date}}',
+  'diagnostics_section_title': 'Diagnostic logs',
+  'diagnostics_section_desc': 'Bundle the last 7 days of logs and system info (API keys masked) for bug reports.',
+  'diagnostics_download': 'Download diagnostic logs',
+  'diagnostics_downloading': 'Packaging…',
+  'diagnostics_download_failed': 'Download failed: {{error}}',
   'config_issues': 'Configuration Issues',
   'config_issues_hint': 'The following issues were found in the current configuration and may affect functionality:',
   'arcreel_agent': '[[brand]] Agent',
@@ -476,6 +481,7 @@ export default {
   'save_failed': 'Failed to save: {{message}}',
 
   // UsageStatsSection
+  'spend_ledger': 'Spend Ledger',
   'last_7_days': 'Last 7 days',
   'last_30_days': 'Last 30 days',
   'all': 'All',
@@ -483,6 +489,7 @@ export default {
   'filter_by_provider': 'Filter by provider',
   'all_providers': 'All providers',
   'no_data': 'No data yet',
+  'total_calls': 'Total Calls',
   'calls': 'Calls',
   'success_count': 'Success',
   'success_rate': 'Success Rate',
@@ -567,6 +574,12 @@ export default {
   'reference_generate_deduped': 'Already in the queue',
   'reference_generate_request_failed': 'Generation request failed: {{error}}; please try again.',
   'reference_generation_task_failed': 'Unit {{unitId}} generation failed: {{reason}}; please try again.',
+  'storyboard_task_failed': 'Storyboard "{{id}}" generation failed: {{reason}}',
+  'video_task_failed': 'Video "{{id}}" generation failed: {{reason}}',
+  'character_task_failed': 'Character "{{id}}" generation failed: {{reason}}',
+  'scene_task_failed': 'Scene "{{id}}" generation failed: {{reason}}',
+  'prop_task_failed': 'Prop "{{id}}" generation failed: {{reason}}',
+  'grid_task_failed': 'Grid generation failed: {{reason}}',
   'episode_mode_switcher_label': 'Episode generation mode',
   'episode_mode_inherit_from_project': 'Inherit from project',
   'episode_mode_switch_keep_data': "Switching mode won't remove existing units / scenes — you can switch back anytime.",
@@ -768,6 +781,7 @@ export default {
   'no_call_records': 'No call records yet',
   'input_token_label': 'Input',
   'output_token_label': 'Output',
+  'tokens_suffix': 'tokens',
   'records_count': '{{count}} records',
 
   // WorkspaceNotificationsDrawer
