@@ -26,7 +26,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useProjectsStore } from "@/stores/projects-store";
 import { useCostStore } from "@/stores/cost-store";
 import { errMsg } from "@/utils/async";
-import { mergeReferences } from "@/utils/reference-mentions";
+import { mergeReferences, withDefaultCharacterForm } from "@/utils/reference-mentions";
 import type {
   ReferenceResource,
   ReferenceVideoUnit,
@@ -309,10 +309,10 @@ export function ReferenceVideoCanvas({
     (ref: ReferenceResource) => {
       if (!selected) return;
       if (selected.references.some((r) => r.type === ref.type && r.name === ref.name)) return;
-      const next = [...selected.references, ref];
+      const next = [...selected.references, withDefaultCharacterForm(ref, project ?? null)];
       patchReferencesAtomic(selected.unit_id, next);
     },
-    [patchReferencesAtomic, selected],
+    [patchReferencesAtomic, project, selected],
   );
 
   // Reset tab to units on project/episode change (render-time derived-state pattern).

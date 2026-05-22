@@ -32,6 +32,7 @@ skills:
 使用 Glob 工具确认中间文件存在：
 - narration 模式：`drafts/episode_{N}/step1_segments.md`
 - drama 模式：`drafts/episode_{N}/step1_normalized_script.md`
+- reference_video 模式：`drafts/episode_{N}/step1_reference_units.md`
 
 如果中间文件不存在，报告错误并说明需要先运行哪个预处理 subagent。
 
@@ -51,6 +52,7 @@ mcp__arcreel__generate_episode_script({"episode": {N}})
 - 包含 episode、content_mode 字段
 - narration 模式：segments 数组不为空
 - drama 模式：scenes 数组不为空
+- reference_video 模式：generation_mode 为 `reference_video`，video_units 数组不为空
 
 ### Step 4: 返回摘要
 
@@ -62,6 +64,7 @@ mcp__arcreel__generate_episode_script({"episode": {N}})
 | 统计项 | 数值 |
 |--------|------|
 | 内容模式 | narration/drama |
+| 生成模式 | storyboard/grid/reference_video |
 | 总片段/场景数 | XX 个 |
 | 总时长 | X 分 X 秒 |
 | 生成模型 | {脚本输出中实际使用的模型名} |

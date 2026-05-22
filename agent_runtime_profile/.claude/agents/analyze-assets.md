@@ -41,6 +41,11 @@ description: 从剧本中提取角色 / 场景 / 道具三类资产定义，按 
 
 **角色提取规则**：
 - 识别在小说中有实质出场的角色
+- 收录标准：
+  - 有明确外貌描写的角色：正常收录
+  - 即使没有明确外貌，只要在 3 个及以上独立场景 / 段落 / 章节中实质出场，也必须收录，目的是保证后续镜头人物一致性
+  - "实质出场"指角色在画面中行动、对话、被看见、参与当前事件；单纯被别人提到、电话里被提及、物品归属提及，不算实质出场
+  - 没有视觉描写但因多次实质出场而必须收录时，允许从剧情语境合理推理基础外貌，但只写大概、稳定、低细节的视觉描述。例如："陈婶"可写成"40 多岁的中年妇女，微胖，卷发"；"外婆"可写成"70 岁左右的老年妇女，面容和蔼，略微驼背"
 - 顶层 description 字段只写**跨形态稳定外貌**：
   - 性别、年龄段、身高/体型
   - 发型/发色、脸型、五官轮廓
@@ -52,7 +57,7 @@ description: 从剧本中提取角色 / 场景 / 道具三类资产定义，按 
 - 必须输出 default_form 与 forms：
   - `default` 是最常见造型，通常为常规服装和状态
   - 特殊形态只提取视觉差异明显且会进入分镜的状态，如病弱、礼服、回忆时期、战斗形态
-  - 每个 form 写 label、description、storyboard_ref_slot=`full_body`、input_refs=[]、refs.full_body/three_view 空路径
+  - 每个 form 写 label、description、storyboard_ref_slot=`three_view`、input_refs=[]、refs.full_body/three_view 空路径
 - **不包含**：性格描述、角色关系、剧情背景
 
 **角色视觉降噪规则**：
@@ -90,7 +95,7 @@ description: 从剧本中提取角色 / 场景 / 道具三类资产定义，按 
 ⚠️ 必须单行，JSON 使用紧凑格式，不可用 `\` 换行：
 
 ```bash
-python .claude/skills/manage-project/scripts/add_assets.py --characters '{"角色名1":{"description":"跨形态稳定外貌...","voice_style":"声音风格...","default_form":"default","forms":{"default":{"label":"默认造型","description":"常规服装和状态...","storyboard_ref_slot":"full_body","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}},"hotel_sick":{"label":"病弱形态","description":"脸色苍白、病号服或虚弱状态...","storyboard_ref_slot":"full_body","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}}}}}' --scenes '{"庙宇": {"description": "空间描述..."}, "客栈大堂": {"description": "环境描述..."}}' --props '{"玉佩": {"description": "外观描述..."}, "长剑": {"description": "外观描述..."}}'
+python .claude/skills/manage-project/scripts/add_assets.py --characters '{"角色名1":{"description":"跨形态稳定外貌...","voice_style":"声音风格...","default_form":"default","forms":{"default":{"label":"默认造型","description":"常规服装和状态...","storyboard_ref_slot":"three_view","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}},"hotel_sick":{"label":"病弱形态","description":"脸色苍白、病号服或虚弱状态...","storyboard_ref_slot":"three_view","input_refs":[],"refs":{"full_body":{"path":"","purpose":"storyboard_reference"},"three_view":{"path":"","purpose":"consistency_review"}}}}}}' --scenes '{"庙宇": {"description": "空间描述..."}, "客栈大堂": {"description": "环境描述..."}}' --props '{"玉佩": {"description": "外观描述..."}, "长剑": {"description": "外观描述..."}}'
 ```
 
 - 已存在的角色/场景/道具会自动跳过（不覆盖已有数据）

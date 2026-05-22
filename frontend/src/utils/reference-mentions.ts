@@ -40,6 +40,19 @@ export function resolveMentionType(
   return undefined;
 }
 
+export function withDefaultCharacterForm(
+  ref: ReferenceResource,
+  project: ProjectBuckets | null | undefined,
+): ReferenceResource {
+  if (ref.type !== "character" || ref.form_id) return ref;
+  const character = project?.characters?.[ref.name];
+  const fallbackForm = character?.forms ? Object.keys(character.forms)[0] : undefined;
+  return {
+    ...ref,
+    form_id: character?.default_form || fallbackForm || "default",
+  };
+}
+
 /**
  * Re-derive the references list for a unit given new prompt text.
  *
@@ -60,7 +73,7 @@ export function mergeReferences(
   const keptNames = new Set<string>();
   for (const ref of existing) {
     if (mentioned.has(ref.name) && !keptNames.has(ref.name)) {
-      kept.push(ref);
+      kept.push(withDefaultCharacterForm(ref, project));
       keptNames.add(ref.name);
     }
   }
@@ -68,7 +81,7 @@ export function mergeReferences(
     if (keptNames.has(name)) continue;
     const type = resolveMentionType(project, name);
     if (!type) continue;
-    kept.push({ type, name });
+    kept.push(withDefaultCharacterForm({ type, name }, project));
     keptNames.add(name);
   }
   return kept;

@@ -3,13 +3,17 @@ import {
   extractMentions,
   resolveMentionType,
   mergeReferences,
+  withDefaultCharacterForm,
 } from "./reference-mentions";
 import type { ProjectData } from "@/types";
 import type { ReferenceResource } from "@/types/reference-video";
 
 function mkProject(): Pick<ProjectData, "characters" | "scenes" | "props"> {
   return {
-    characters: { 主角: { description: "" }, 张三: { description: "" } },
+    characters: {
+      主角: { description: "", default_form: "default" },
+      张三: { description: "", default_form: "default" },
+    },
     scenes: { 酒馆: { description: "" } },
     props: { 长剑: { description: "" } },
   };
@@ -52,8 +56,8 @@ describe("mergeReferences", () => {
     ];
     const merged = mergeReferences("Shot 1 (3s): @张三 @主角", existing, project);
     expect(merged).toEqual([
-      { type: "character", name: "张三" },
-      { type: "character", name: "主角" },
+      { type: "character", name: "张三", form_id: "default" },
+      { type: "character", name: "主角", form_id: "default" },
     ]);
   });
 
@@ -74,21 +78,45 @@ describe("mergeReferences", () => {
       { type: "scene", name: "酒馆" },
     ];
     const merged = mergeReferences("Shot 1 (3s): @张三", existing, project);
-    expect(merged).toEqual([{ type: "character", name: "张三" }]);
+    expect(merged).toEqual([{ type: "character", name: "张三", form_id: "default" }]);
   });
 
   it("skips unknown mentions (not resolvable to any bucket)", () => {
     const merged = mergeReferences("Shot 1 (3s): @路人 @主角", [], project);
-    expect(merged).toEqual([{ type: "character", name: "主角" }]);
+    expect(merged).toEqual([{ type: "character", name: "主角", form_id: "default" }]);
   });
 
   it("deduplicates repeated mentions", () => {
     const merged = mergeReferences("Shot 1 (3s): @主角 @主角 @主角", [], project);
-    expect(merged).toEqual([{ type: "character", name: "主角" }]);
+    expect(merged).toEqual([{ type: "character", name: "主角", form_id: "default" }]);
   });
 
   it("returns empty list when prompt has no valid mentions", () => {
     expect(mergeReferences("Shot 1 (3s): plain", [], project)).toEqual([]);
+  });
+});
+
+describe("withDefaultCharacterForm", () => {
+  const project = mkProject();
+
+  it("adds default form_id to character references", () => {
+    expect(withDefaultCharacterForm({ type: "character", name: "主角" }, project)).toEqual({
+      type: "character",
+      name: "主角",
+      form_id: "default",
+    });
+  });
+
+  it("preserves explicit form_id and ignores non-character references", () => {
+    expect(withDefaultCharacterForm({ type: "character", name: "主角", form_id: "sick" }, project)).toEqual({
+      type: "character",
+      name: "主角",
+      form_id: "sick",
+    });
+    expect(withDefaultCharacterForm({ type: "scene", name: "酒馆" }, project)).toEqual({
+      type: "scene",
+      name: "酒馆",
+    });
   });
 });
 
