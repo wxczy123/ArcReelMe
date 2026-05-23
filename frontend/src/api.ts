@@ -1641,7 +1641,7 @@ class API {
 
   static async createCredential(
     providerId: string,
-    data: { name: string; api_key?: string; base_url?: string },
+    data: { name: string; api_key?: string | null; base_url?: string | null },
   ): Promise<ProviderCredential> {
     return this.request(`/providers/${encodeURIComponent(providerId)}/credentials`, {
       method: "POST",
@@ -1652,7 +1652,7 @@ class API {
   static async updateCredential(
     providerId: string,
     credId: number,
-    data: { name?: string; api_key?: string; base_url?: string },
+    data: { name?: string; api_key?: string | null; base_url?: string | null },
   ): Promise<void> {
     return this.request(
       `/providers/${encodeURIComponent(providerId)}/credentials/${credId}`,

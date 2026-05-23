@@ -65,3 +65,23 @@ def test_ark_agent_plan_backend_registered() -> None:
     assert image_reg["ark-agent-plan"] is ArkImageBackend
     assert video_reg["ark-agent-plan"] is ArkVideoBackend
     assert text_reg["ark-agent-plan"] is ArkTextBackend
+
+
+def test_xyq_web_backend_registered() -> None:
+    """小云雀网页 provider 同时注册 image/video backend。"""
+    import lib.image_backends  # noqa: F401  触发自注册
+    import lib.video_backends  # noqa: F401
+    from lib.image_backends.registry import _BACKEND_FACTORIES as image_reg
+    from lib.image_backends.xyq_web import XyqWebImageBackend
+    from lib.video_backends.registry import _BACKEND_FACTORIES as video_reg
+    from lib.video_backends.xyq_web import XyqWebVideoBackend
+
+    assert image_reg["xyq-web"] is XyqWebImageBackend
+    assert video_reg["xyq-web"] is XyqWebVideoBackend
+
+
+def test_xyq_web_baseline_models_present() -> None:
+    """小云雀网页 provider 暴露录制脚本已覆盖的视频模型。"""
+    p = PROVIDER_REGISTRY["xyq-web"]
+    baseline = {"seedream-4.0-aesthetic", "seedance-2.0", "seedance-2.0-fast"}
+    assert baseline.issubset(set(p.models.keys()))

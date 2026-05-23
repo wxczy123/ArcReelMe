@@ -496,4 +496,35 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
             ),
         },
     ),
+    "xyq-web": ProviderMeta(
+        display_name="小云雀 Web",
+        description="通过本机 Playwright 浏览器自动化调用小云雀网页，支持 Seedream 图片生成与 Seedance 视频生成。",
+        required_keys=[],
+        optional_keys=["profile_dir", "download_dir", "headless", "timeout_seconds"],
+        secret_keys=[],
+        models={
+            "seedream-4.0-aesthetic": ModelInfo(
+                display_name="Seedream 4.0 美感版（小云雀网页）",
+                media_type="image",
+                capabilities=["text_to_image", "image_to_image"],
+                default=True,
+                resolutions=["720p"],
+            ),
+            "seedance-2.0": ModelInfo(
+                display_name="Seedance 2.0（小云雀网页）",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                default=True,
+                supported_durations=list(range(1, 16)),
+                resolutions=["720p"],
+            ),
+            "seedance-2.0-fast": ModelInfo(
+                display_name="Seedance 2.0 Fast（小云雀网页）",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                supported_durations=list(range(1, 16)),
+                resolutions=["720p"],
+            ),
+        },
+    ),
 }

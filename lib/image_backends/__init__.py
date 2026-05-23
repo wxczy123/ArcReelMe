@@ -46,3 +46,8 @@ from lib.image_backends.vidu import ViduImageBackend
 from lib.providers import PROVIDER_VIDU
 
 register_backend(PROVIDER_VIDU, ViduImageBackend)
+
+from lib.image_backends.xyq_web import XyqWebImageBackend
+from lib.providers import PROVIDER_XYQ_WEB
+
+register_backend(PROVIDER_XYQ_WEB, XyqWebImageBackend)

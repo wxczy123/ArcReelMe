@@ -334,11 +334,12 @@ const CredentialRow = memo(function CredentialRow({ cred, providerId, isVertex, 
 interface AddFormProps {
   providerId: string;
   isVertex: boolean;
+  noApiKeyRequired: boolean;
   onCreated: () => void;
   onCancel: () => void;
 }
 
-function AddCredentialForm({ providerId, isVertex, onCreated, onCancel }: AddFormProps) {
+function AddCredentialForm({ providerId, isVertex, noApiKeyRequired, onCreated, onCancel }: AddFormProps) {
   const { t } = useTranslation("dashboard");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -363,14 +364,14 @@ function AddCredentialForm({ providerId, isVertex, onCreated, onCancel }: AddFor
         }
         await API.uploadVertexCredential(name, file);
       } else {
-        if (!apiKey.trim()) {
+        if (!noApiKeyRequired && !apiKey.trim()) {
           setError(t("enter_api_key_required"));
           setSaving(false);
           return;
         }
         await API.createCredential(providerId, {
           name: name.trim(),
-          api_key: apiKey || undefined,
+          api_key: apiKey || null,
           base_url: baseUrl || undefined,
         });
       }
@@ -428,6 +429,10 @@ function AddCredentialForm({ providerId, isVertex, onCreated, onCancel }: AddFor
             }}
           />
         </div>
+      ) : noApiKeyRequired ? (
+        <p className="rounded-[8px] border border-hairline-soft bg-bg-grad-a/45 px-3 py-2 text-[12px] leading-[1.55] text-text-3">
+          {t("xyq_web_credential_hint")}
+        </p>
       ) : (
         <>
           <div>
@@ -511,6 +516,7 @@ export function CredentialList({ providerId, onChanged }: Props) {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const isVertex = providerId === "gemini-vertex";
+  const noApiKeyRequired = providerId === "xyq-web";
 
   const onChangedRef = useRef(onChanged);
   // 同步最新 onChanged 回调到 ref，供异步刷新后调用
@@ -600,6 +606,7 @@ export function CredentialList({ providerId, onChanged }: Props) {
           <AddCredentialForm
             providerId={providerId}
             isVertex={isVertex}
+            noApiKeyRequired={noApiKeyRequired}
             onCreated={() => {
               setShowAdd(false);
               void handleChanged();

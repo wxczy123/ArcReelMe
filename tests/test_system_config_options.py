@@ -353,14 +353,15 @@ class TestBuildOptionsProviderNames:
         assert options["provider_names"][f"custom-{p2.id}"] == "Provider B"
 
     async def test_empty_provider_names_when_no_custom_providers(self, session):
+        """无自定义供应商时仍返回预置供应商名称，供前端项目级模型下拉使用。"""
         db_session, _factory = session
         mock_svc = _make_mock_svc()
         options = await _build_options(mock_svc, db_session)
 
-        assert options["provider_names"] == {}
+        assert options["provider_names"]["xyq-web"] == "小云雀 Web"
 
     async def test_disabled_models_provider_not_in_names(self, session):
-        """如果供应商所有模型都被禁用，则不出现在 provider_names 中。"""
+        """自定义供应商所有模型禁用时不进 provider_names；预置供应商名称仍保留。"""
         db_session, factory = session
         repo = CustomProviderRepository(db_session)
         await repo.create_provider(
@@ -383,4 +384,4 @@ class TestBuildOptionsProviderNames:
         mock_svc = _make_mock_svc()
         options = await _build_options(mock_svc, db_session)
 
-        assert options["provider_names"] == {}
+        assert options["provider_names"]["xyq-web"] == "小云雀 Web"

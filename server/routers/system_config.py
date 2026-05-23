@@ -138,6 +138,7 @@ async def _build_options(svc: ConfigService, session: AsyncSession) -> _OptionsD
     _MEDIA_TO_BUCKET = {"video": "video_backends", "image": "image_backends", "text": "text_backends"}
 
     for provider_id, meta in PROVIDER_REGISTRY.items():
+        provider_names[provider_id] = meta.display_name
         if provider_id not in ready_providers:
             continue
         for model_id, model_info in meta.models.items():

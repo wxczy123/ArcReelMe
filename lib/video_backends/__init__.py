@@ -63,3 +63,8 @@ from lib.providers import PROVIDER_VIDU  # noqa: E402
 from lib.video_backends.vidu import ViduVideoBackend  # noqa: E402
 
 register_backend(PROVIDER_VIDU, ViduVideoBackend)
+
+from lib.providers import PROVIDER_XYQ_WEB  # noqa: E402
+from lib.video_backends.xyq_web import XyqWebVideoBackend  # noqa: E402
+
+register_backend(PROVIDER_XYQ_WEB, XyqWebVideoBackend)

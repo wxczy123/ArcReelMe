@@ -46,7 +46,7 @@ from lib.prompt_utils import (
     is_structured_video_prompt,
     video_prompt_to_yaml,
 )
-from lib.providers import PROVIDER_ARK, PROVIDER_GEMINI, PROVIDER_GROK, PROVIDER_OPENAI, PROVIDER_VIDU
+from lib.providers import PROVIDER_ARK, PROVIDER_GEMINI, PROVIDER_GROK, PROVIDER_OPENAI, PROVIDER_VIDU, PROVIDER_XYQ_WEB
 from lib.storyboard_sequence import (
     build_previous_storyboard_reference,
     find_storyboard_item,
@@ -73,6 +73,7 @@ _PROVIDER_ID_TO_BACKEND: dict[str, str] = {
     PROVIDER_GROK: PROVIDER_GROK,
     PROVIDER_OPENAI: PROVIDER_OPENAI,
     PROVIDER_VIDU: PROVIDER_VIDU,
+    PROVIDER_XYQ_WEB: PROVIDER_XYQ_WEB,
 }
 
 
@@ -273,13 +274,18 @@ async def _fill_simple_provider_kwargs(
     """
     from lib.config.registry import PROVIDER_REGISTRY
 
-    db_config = await resolver.provider_config(backend_name)
+    config_id = PROVIDER_XYQ_WEB if backend_name == PROVIDER_XYQ_WEB else backend_name
+    db_config = await resolver.provider_config(config_id)
     kwargs["api_key"] = db_config.get("api_key")
     kwargs["model"] = effective_model
     meta = PROVIDER_REGISTRY.get(backend_name)
     base_url = db_config.get("base_url") or (meta.default_base_url if meta else None)
     if base_url:
         kwargs["base_url"] = base_url
+    if backend_name == PROVIDER_XYQ_WEB:
+        for key in ("profile_dir", "download_dir", "headless", "timeout_seconds"):
+            if db_config.get(key):
+                kwargs[key] = db_config[key]
 
 
 async def _get_or_create_image_backend(

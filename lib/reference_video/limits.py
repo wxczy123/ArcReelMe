@@ -21,6 +21,7 @@ PROVIDER_MAX_REFS: dict[str, int] = {
     "grok": 7,
     "ark": 9,
     "vidu": 7,
+    "xyq-web": 7,
 }
 
 DEFAULT_MAX_REFS = 9

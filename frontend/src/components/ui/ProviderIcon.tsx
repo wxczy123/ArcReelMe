@@ -9,9 +9,11 @@ export const PROVIDER_NAMES: Record<string, string> = {
   "gemini-aistudio": "AI Studio",
   "gemini-vertex": "Vertex AI",
   ark: "火山方舟",
+  "ark-agent-plan": "火山方舟 Agent Plan",
   grok: "Grok",
   openai: "OpenAI",
   vidu: "Vidu",
+  "xyq-web": "小云雀 Web",
 };
 
 /**

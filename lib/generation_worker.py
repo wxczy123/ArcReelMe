@@ -145,8 +145,12 @@ async def _load_pools_from_db() -> dict[str, ProviderPool]:
             config = all_configs.get(provider_id, {})
             supports_image = "image" in meta.media_types
             supports_video = "video" in meta.media_types
-            image_max = int(config.get("image_max_workers", str(default_image))) if supports_image else 0
-            video_max = int(config.get("video_max_workers", str(default_video))) if supports_video else 0
+            if provider_id == "xyq-web":
+                image_max = 1 if supports_image else 0
+                video_max = 1 if supports_video else 0
+            else:
+                image_max = int(config.get("image_max_workers", str(default_image))) if supports_image else 0
+                video_max = int(config.get("video_max_workers", str(default_video))) if supports_video else 0
             pools[provider_id] = ProviderPool(
                 provider_id=provider_id,
                 image_max=max(0, image_max),

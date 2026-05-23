@@ -8,6 +8,7 @@ PROVIDER_ARK_AGENT_PLAN = "ark-agent-plan"
 PROVIDER_GROK = "grok"
 PROVIDER_OPENAI = "openai"
 PROVIDER_VIDU = "vidu"
+PROVIDER_XYQ_WEB = "xyq-web"
 PROVIDER_NEWAPI = "newapi"
 PROVIDER_ANTHROPIC = "anthropic"
 

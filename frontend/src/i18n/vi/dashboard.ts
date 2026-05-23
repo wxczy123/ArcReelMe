@@ -915,6 +915,7 @@ export default {
   'select_json_file': 'Chọn tệp JSON...',
   'select_credential_file': 'Vui lòng chọn tệp xác thực',
   'enter_api_key_required': 'Vui lòng nhập khóa API',
+  'xyq_web_credential_hint': 'Xiaoyunque dùng trạng thái đăng nhập của trình duyệt cục bộ và không cần API key. Thêm một thông tin xác thực chỉ để bật nhà cung cấp tự động hóa web này.',
 
   // ProviderModelSelect
   'select_model_placeholder': 'Chọn mô hình...',

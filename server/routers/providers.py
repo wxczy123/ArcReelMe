@@ -56,6 +56,10 @@ _FIELD_META: dict[str, dict[str, str]] = {
     "request_gap": {"label": "Request Gap (sec)", "type": "number"},
     "image_max_workers": {"label": "Image Max Workers", "type": "number"},
     "video_max_workers": {"label": "Video Max Workers", "type": "number"},
+    "profile_dir": {"label": "Browser Profile Dir", "type": "text", "placeholder": "~/.arcreel-browser-profiles/xyq"},
+    "download_dir": {"label": "Download Dir", "type": "text", "placeholder": "~/downbyxyq"},
+    "headless": {"label": "Headless", "type": "text", "placeholder": "false"},
+    "timeout_seconds": {"label": "Timeout Seconds", "type": "number", "placeholder": "2700"},
 }
 
 
@@ -622,6 +626,36 @@ def _test_vidu(config: dict[str, str], _t: Callable[..., str]) -> ConnectionTest
     )
 
 
+def _test_xyq_web(config: dict[str, str], _t: Callable[..., str]) -> ConnectionTestResponse:
+    """小云雀网页 provider 只检查本机 profile 目录和 Python Playwright 依赖。"""
+    import importlib.util
+
+    from lib.web_automation.xyq import (
+        XYQ_DEFAULT_PROFILE_DIR,
+        XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC,
+        XYQ_VIDEO_MODEL_SEEDANCE_2,
+    )
+
+    if importlib.util.find_spec("playwright") is None:
+        return ConnectionTestResponse(
+            success=False,
+            available_models=[],
+            message="Python Playwright 未安装，请先安装 playwright 并执行 playwright install chromium",
+        )
+    profile_dir = Path(config.get("profile_dir") or XYQ_DEFAULT_PROFILE_DIR).expanduser()
+    if not profile_dir.exists():
+        return ConnectionTestResponse(
+            success=False,
+            available_models=[],
+            message=f"浏览器 profile 不存在: {profile_dir}",
+        )
+    return ConnectionTestResponse(
+        success=True,
+        available_models=[XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC, XYQ_VIDEO_MODEL_SEEDANCE_2],
+        message=_t("connection_success"),
+    )
+
+
 _TEST_DISPATCH: dict[str, Callable[[dict[str, str], Any], ConnectionTestResponse]] = {
     "gemini-aistudio": _test_gemini_aistudio,
     "gemini-vertex": _test_gemini_vertex,
@@ -630,6 +664,7 @@ _TEST_DISPATCH: dict[str, Callable[[dict[str, str], Any], ConnectionTestResponse
     "grok": _test_grok,
     "openai": _test_openai,
     "vidu": _test_vidu,
+    "xyq-web": _test_xyq_web,
 }
 
 

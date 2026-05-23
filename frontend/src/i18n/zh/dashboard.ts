@@ -950,6 +950,7 @@ export default {
   'select_json_file': '选择 JSON 文件…',
   'select_credential_file': '请选择凭证文件',
   'enter_api_key_required': '请输入 API Key',
+  'xyq_web_credential_hint': '小云雀使用本机浏览器登录态，不需要 API Key。添加一条凭证只是启用这个网页自动化供应商。',
 
   // ProviderModelSelect
   'select_model_placeholder': '选择模型…',

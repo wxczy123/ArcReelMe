@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from lib.custom_provider import is_custom_provider
 from lib.openai_shared import OPENAI_IMAGE_SIZE_MAP
-from lib.providers import PROVIDER_ANTHROPIC, PROVIDER_ARK, PROVIDER_GROK, PROVIDER_OPENAI, CallType
+from lib.providers import PROVIDER_ANTHROPIC, PROVIDER_ARK, PROVIDER_GROK, PROVIDER_OPENAI, PROVIDER_XYQ_WEB, CallType
 
 # fork: Vidu provider — 单独 import 块以避免与上游聚合 import 冲突
 # isort: off
@@ -539,6 +539,8 @@ class CostCalculator:
                     model=model,
                     resolution=resolution,
                 )
+            if provider == PROVIDER_XYQ_WEB:
+                return 0.0, "CNY"
             return self.calculate_image_cost(resolution or "1K", model=model), "USD"
 
         if call_type == "video":
@@ -568,6 +570,8 @@ class CostCalculator:
                     resolution=resolution,
                     duration_seconds=duration_seconds,
                 )
+            if provider == PROVIDER_XYQ_WEB:
+                return 0.0, "CNY"
             return self.calculate_video_cost(
                 duration_seconds=duration_seconds or 8,
                 resolution=resolution or "1080p",
@@ -629,6 +633,8 @@ class CostCalculator:
                 resolution=resolution,
                 duration_seconds=total_duration,
             )
+        if provider == PROVIDER_XYQ_WEB:
+            return 0.0, "CNY"
         # Gemini/Veo 默认
         return (
             self.calculate_video_cost(

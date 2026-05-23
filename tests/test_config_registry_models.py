@@ -52,8 +52,8 @@ class TestProviderMeta:
 
 
 class TestProviderRegistry:
-    # vidu 仅提供图片与视频能力，跳过文本相关断言
-    _TEXT_PROVIDERS = [pid for pid in PROVIDER_REGISTRY if pid != "vidu"]
+    # vidu / xyq-web 仅提供图片与视频能力，跳过文本相关断言
+    _TEXT_PROVIDERS = [pid for pid in PROVIDER_REGISTRY if pid not in {"vidu", "xyq-web"}]
 
     def test_all_providers_have_text_models(self):
         for provider_id in self._TEXT_PROVIDERS:
@@ -62,13 +62,13 @@ class TestProviderRegistry:
             assert len(text_models) > 0, f"{provider_id} has no text models"
 
     def test_all_providers_have_image_models(self):
-        for provider_id in ("gemini-aistudio", "gemini-vertex", "ark", "grok"):
+        for provider_id in ("gemini-aistudio", "gemini-vertex", "ark", "grok", "xyq-web"):
             meta = PROVIDER_REGISTRY[provider_id]
             image_models = [mid for mid, m in meta.models.items() if m.media_type == "image"]
             assert len(image_models) > 0, f"{provider_id} has no image models"
 
     def test_all_providers_have_video_models(self):
-        for provider_id in ("gemini-aistudio", "gemini-vertex", "ark", "grok"):
+        for provider_id in ("gemini-aistudio", "gemini-vertex", "ark", "grok", "xyq-web"):
             meta = PROVIDER_REGISTRY[provider_id]
             video_models = [mid for mid, m in meta.models.items() if m.media_type == "video"]
             assert len(video_models) > 0, f"{provider_id} has no video models"
@@ -101,3 +101,10 @@ class TestProviderRegistry:
         # 1.5 Pro 仍然是默认模型
         assert video_models["doubao-seedance-1-5-pro-251215"].default is True
         assert video_models["doubao-seedance-2-0-260128"].default is False
+
+    def test_xyq_web_video_models_include_seedance_fast(self):
+        meta = PROVIDER_REGISTRY["xyq-web"]
+        video_models = {mid: m for mid, m in meta.models.items() if m.media_type == "video"}
+        assert set(video_models) == {"seedance-2.0", "seedance-2.0-fast"}
+        assert video_models["seedance-2.0"].default is True
+        assert video_models["seedance-2.0-fast"].default is False

@@ -949,6 +949,7 @@ export default {
   'select_json_file': 'Select JSON file...',
   'select_credential_file': 'Please select a credential file',
   'enter_api_key_required': 'Please enter API Key',
+  'xyq_web_credential_hint': 'Xiaoyunque uses the local browser login state and does not need an API key. Adding a credential only enables this web automation provider.',
 
   // ProviderModelSelect
   'select_model_placeholder': 'Select model...',
