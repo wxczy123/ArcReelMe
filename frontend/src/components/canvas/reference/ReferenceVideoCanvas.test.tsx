@@ -9,7 +9,7 @@ import { API } from "@/api";
 import type { ReferenceVideoUnit } from "@/types";
 import type { ProjectData } from "@/types";
 
-function mkUnit(id: string, shotText = "x"): ReferenceVideoUnit {
+function mkUnit(id: string, shotText = "x", overrides: Partial<ReferenceVideoUnit> = {}): ReferenceVideoUnit {
   return {
     unit_id: id,
     shots: [{ duration: 3, text: shotText }],
@@ -27,6 +27,7 @@ function mkUnit(id: string, shotText = "x"): ReferenceVideoUnit {
       video_uri: null,
       status: "pending",
     },
+    ...overrides,
   };
 }
 
@@ -179,6 +180,47 @@ describe("ReferenceVideoCanvas", () => {
     await waitFor(() => {
       expect(useAppStore.getState().toast?.text).toMatch(/Queued for generation|已加入生成队列/);
     });
+  });
+
+  it("keeps a generated unit ready even when an older task row is failed", async () => {
+    vi.spyOn(API, "listReferenceVideoUnits").mockResolvedValue({
+      units: [
+        mkUnit("E1U1", "ready", {
+          generated_assets: {
+            ...mkUnit("E1U1").generated_assets,
+            video_clip: "reference_videos/E1U1.mp4",
+            status: "completed",
+          },
+        }),
+      ],
+    });
+    useTasksStore.setState({
+      tasks: [
+        {
+          task_id: "old-failed",
+          project_name: "proj",
+          task_type: "reference_video",
+          media_type: "video",
+          resource_id: "E1U1",
+          script_file: "scripts/episode_1.json",
+          payload: {},
+          status: "failed",
+          result: null,
+          error_message: "old failure",
+          cancelled_by: null,
+          source: "webui",
+          queued_at: "2026-01-01T00:00:00Z",
+          started_at: null,
+          finished_at: "2026-01-01T00:01:00Z",
+          updated_at: "2026-01-01T00:01:00Z",
+        },
+      ],
+      connected: false,
+    });
+    render(<ReferenceVideoCanvas projectName="proj" episode={1} />);
+    await waitFor(() => expect(screen.getByTestId("unit-row-E1U1")).toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: /Regenerate|重新生成/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Generation failed|生成失败/)).not.toBeInTheDocument();
   });
 
   // 后台任务失败通知已统一迁移到全局 useTaskFailureNotifications hook（转变驱动 /

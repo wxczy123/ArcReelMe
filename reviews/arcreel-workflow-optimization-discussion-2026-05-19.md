@@ -161,16 +161,51 @@ source/episode_N.txt
 
 参考生视频：
 source/episode_N.txt
+  -> drafts/episode_N/step0_episode_adaptation.md
   -> drafts/episode_N/step1_reference_units.md
   -> scripts/episode_N.json / video_units[]
   -> 直接使用角色 / 场景 / 道具参考图生成视频
 ```
 
-#### 参考生视频阶段 3：video_unit 拆分
+#### 参考生视频阶段 3A：单集短剧改编规划
+
+当前新增职责：
+
+- 由 `adapt-reference-video-episode` 先把本集小说改编为短剧结构规划。
+- 输出中间文件：
+
+```text
+drafts/episode_N/step0_episode_adaptation.md
+```
+
+主要解决的问题：
+
+- 原先直接从小说拆 `video_unit`，容易把小说段落原样摊开，导致 10-15 秒过去只有“醒来、环顾、闭眼回忆”等低密度内容。
+- 小说里的“记忆涌入”“经脉疏通”“气息凝实”“现代灵魂冷静下来”等抽象内容，如果直接进入 shot text，视频模型难以执行，观众也看不到剧情信息。
+- 参考生视频需要先确定短剧观看节奏，再进入具体 video_unit 和 shot 文本。
+
+阶段 3A 输出内容：
+
+- 本集一句话。
+- 开场钩子：3-8 秒内让观众知道发生了大事。
+- 结尾钩子：下一集悬念或冲突升级。
+- 必须交代的信息。
+- 压缩 / 不拍的信息。
+- 资产与形态缺口。
+- Unit 规划：`unit_id | 剧情功能 | 必须出现的可见事件 | 外化方式 | 建议 references | 角色形态 | 资产缺口`。
+
+改编要求：
+
+- 每个 unit 必须推进剧情，至少提供新信息、冲突升级、角色行动、反转后果或下一步目标。
+- 抽象信息必须外化为可见面板、对白、屏幕文字、声音提示、闪回画面、环境反应或他人反应。
+- 允许在本集范围内做短暂冷开场，不必机械遵循原文顺序。
+- 不输出完整 shot 文本，完整 shot 文本交给阶段 3B。
+
+#### 参考生视频阶段 3B：video_unit 拆分
 
 当前职责：
 
-- 由 `split-reference-video-units` 将本集原文拆成多个 `video_unit`。
+- 由 `split-reference-video-units` 读取 `step0_episode_adaptation.md`，将改编规划拆成多个 `video_unit`。
 - 每个 `video_unit` 对应一次视频生成调用。
 - 一个 `video_unit` 内可以包含 1-4 个 `shot`。
 - 输出中间文件：
@@ -182,14 +217,18 @@ drafts/episode_N/step1_reference_units.md
 当前需要解决的问题：
 
 - 不能把图生视频的“分镜拆解思路”直接搬到参考生视频。
+- 不能重新从小说自由改编，应优先继承阶段 3A 的开场钩子、结尾钩子、Unit 规划和外化方式。
 - 参考生视频的关键不是“每个画面怎么构图”，而是“每次视频生成调用该喂哪些参考图，以及这些参考图能否支撑当前动作”。
 - `shot text` 里不应该继续写大量外貌、服装、场景色调、光影细节，因为这些信息应由参考图承担。
 - 不能在 `@名称` 中引用 `project.json` 里没有注册的角色、场景、道具。
 - 如果资产表为空，或当前集需要的关键资产不存在，应该先回到资产提取 / 资产生成，而不是继续生成一堆无法落地的 `@名称`。
+- 每个 shot 都必须有可见剧情信息，避免只有动作姿态或情绪变化。
+- 抽象过程必须外化，例如“记忆涌入”改为系统面板 / 闪回 / 角色身体反应；“修为提升”改为测灵石亮起 / 掌心灵光稳定 / 对手表情变化。
 
 优化方向：
 
 - `video_unit` 按“同一时间、同一地点、主体动作连续、参考图集合稳定”来切分。
+- unit 顺序、剧情功能、关键可见事件继承 `step0_episode_adaptation.md`；只有模型时长、参考图数量或资产缺口冲突时才调整。
 - 不为了凑满时长强行合并不连续事件；时间、地点、主体动作发生明显变化时应拆成新 unit。
 - 每个 unit 的 `references` 只放真正要喂给模型的关键资产。
 - `references` 数量必须受当前视频模型的 `max_reference_images` 约束。
@@ -554,3 +593,53 @@ server/agent_runtime/sdk_tools/enqueue_assets.py
 frontend/src/components/canvas/reference/ReferencePanel.tsx
 frontend/src/types/reference-video.ts
 ```
+
+## 2026-05-23 参考生视频阶段 3 剧情密度优化
+
+本次针对参考生视频模式出现的“shot 文本有镜头语言但剧情太水、抽象内容不可拍”的问题，把阶段 3 拆成两步：
+
+- 阶段 3A：`adapt-reference-video-episode` 生成 `drafts/episode_N/step0_episode_adaptation.md`。
+- 阶段 3B：`split-reference-video-units` 读取 step0 规划，再生成 `drafts/episode_N/step1_reference_units.md`。
+
+新增规则：
+
+- step0 必须包含本集一句话、开场钩子、结尾钩子、必须交代的信息、压缩 / 不拍的信息、资产与形态缺口、Unit 规划。
+- 每个 unit 必须推进剧情，不能只写醒来、环顾、沉思、行走、表情变化。
+- “记忆涌入”“经脉疏通”“气息凝实”“现代灵魂占据身体”等抽象内容必须外化为可见面板、对白、屏幕文字、声音提示、闪回画面、环境反应或他人反应。
+- `split-reference-video-units` 不再直接从小说自由改编，而是优先继承 step0 的开场钩子、结尾钩子、Unit 规划和外化方式。
+- Web 草稿路由新增 reference_video 的 step0 文件映射，左侧草稿列表可显示“单集改编规划”。
+
+同时新增风格模板：
+
+- `anim_cn_3d_realistic`
+- 名称：`3D国风写实`
+- Prompt：`抖音漫剧同款 3D 国风写实画风，极致精细建模，清晰呈现面部毛孔、自然油光，皮肤纹理真实细腻，衣物布料质感分明，电影级高清画质，柔和写实光影`
+
+## 2026-05-24 资产风格分类型与手动补片入口
+
+本次把项目风格模板从“同一段 prompt 直接给人物 / 场景 / 物品共用”，扩展为“模板可按资产类型覆盖 prompt”。旧模板没有专属配置时仍回退通用 prompt，保持原有表现。
+
+`3D国风写实` 现在使用三段资产类型 prompt：
+
+- 人物：保留面部毛孔、自然油光、皮肤纹理、衣物布料等人物质感描述。
+- 场景：保留 3D 国风写实、精细建模、电影级高清、柔和写实光影，并明确“图中不要出现任何人物、角色”。
+- 物品：保留 3D 国风写实、精细建模、电影级高清，并明确“图中不要出现任何人物、角色”。
+
+同时确认并测试了场景、物品的直接上传资产图链路：
+
+- `SceneCard` / `PropCard` 工具栏已有上传按钮。
+- 后端 `/upload/scene`、`/upload/prop` 会把图片保存到 `scenes/`、`props/`，并写回 `scene_sheet` / `prop_sheet`。
+
+参考生视频也新增了手动上传视频入口：
+
+- 单元预览面板新增“上传视频”按钮，只接受 `.mp4`。
+- 后端新增 `/reference-videos/episodes/{episode}/units/{unit_id}/upload`，保存到 `reference_videos/{unit_id}.mp4`。
+- 上传后写入版本历史，提取缩略图，回写 `generated_assets.video_clip` / `video_thumbnail` / `status=completed`。
+- 上传或生成成功都会通过 `reference_video_ready` 事件带 `asset_fingerprints` 通知前端。
+
+修复一个参考生视频状态显示问题：
+
+- 以前如果某个 unit 旧任务失败、后续又成功生成视频，画布可能仍按旧 failed 任务显示失败。
+- 现在前端优先以 `generated_assets.video_clip` 判定 ready，不再被旧 failed 队列行覆盖。
+- SSE 收到 `reference_video_ready` 后会主动重拉对应 episode 的 `video_units`，避免只刷新项目详情而参考视频 store 仍停留在旧状态。
+- 列表接口增加读时自愈：如果磁盘上已经存在 `reference_videos/{unit_id}.mp4`，但剧本 JSON 还没写 `generated_assets.video_clip`，会补齐 `video_clip`、`video_thumbnail` 和 `status=completed`，避免“文件已生成但前端仍显示失败”的脏数据残留。

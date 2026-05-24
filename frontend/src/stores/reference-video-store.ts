@@ -1,6 +1,7 @@
 // frontend/src/stores/reference-video-store.ts
 import { create } from "zustand";
 import { API } from "@/api";
+import { useProjectsStore } from "@/stores/projects-store";
 import { errMsg } from "@/utils/async";
 import type { ReferenceResource, ReferenceVideoUnit, TransitionType } from "@/types";
 
@@ -39,6 +40,7 @@ interface ReferenceVideoStore {
   deleteUnit: (projectName: string, episode: number, unitId: string) => Promise<void>;
   reorderUnits: (projectName: string, episode: number, unitIds: string[]) => Promise<void>;
   generate: (projectName: string, episode: number, unitId: string) => Promise<{ task_id: string; deduped: boolean }>;
+  uploadVideo: (projectName: string, episode: number, unitId: string, file: File) => Promise<ReferenceVideoUnit>;
   select: (unitId: string | null) => void;
 }
 
@@ -110,6 +112,24 @@ export const useReferenceVideoStore = create<ReferenceVideoStore>((set) => ({
 
   generate: async (projectName, episode, unitId) => {
     return API.generateReferenceVideoUnit(projectName, episode, unitId);
+  },
+
+  uploadVideo: async (projectName, episode, unitId, file) => {
+    const { unit, asset_fingerprints } = await API.uploadReferenceVideoUnit(projectName, episode, unitId, file);
+    if (asset_fingerprints) {
+      useProjectsStore.getState().updateAssetFingerprints(asset_fingerprints);
+    }
+    set((s) => {
+      const key = referenceVideoCacheKey(projectName, episode);
+      const list = s.unitsByEpisode[key] ?? [];
+      return {
+        unitsByEpisode: {
+          ...s.unitsByEpisode,
+          [key]: list.map((u) => (u.unit_id === unitId ? unit : u)),
+        },
+      };
+    });
+    return unit;
   },
 
   select: (unitId) => set({ selectedUnitId: unitId }),

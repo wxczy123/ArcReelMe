@@ -6,7 +6,11 @@ prompt 文本来自 docs/生图画风前置提示词4.10.docx。
 
 from __future__ import annotations
 
-# 完整 36 条，顺序即 UI 展示顺序
+from typing import Literal
+
+AssetPromptType = Literal["character", "scene", "prop"]
+
+# 完整 37 条，顺序即 UI 展示顺序
 STYLE_TEMPLATES: dict[str, dict] = {
     # ===== 真人 AI 漫剧 (18) =====
     "live_cinematic_ancient": {"category": "live", "prompt": "画风：精品古装真人短剧风格，专业打光，高质量电视剧质感"},
@@ -60,6 +64,15 @@ STYLE_TEMPLATES: dict[str, dict] = {
     # ===== 动画 AI 漫剧 (18) =====
     "anim_3d_cg": {"category": "anim", "prompt": "画风：3D、游戏CG，影视级、虚幻引擎渲染"},
     "anim_cn_3d": {"category": "anim", "prompt": "画风：国风3D、影视级、虚幻引擎渲染"},
+    "anim_cn_3d_realistic": {
+        "category": "anim",
+        "prompt": "抖音漫剧同款 3D 国风写实画风，极致精细建模，清晰呈现面部毛孔、自然油光，皮肤纹理真实细腻，衣物布料质感分明，电影级高清画质，柔和写实光影。",
+        "asset_prompts": {
+            "character": "抖音漫剧同款 3D 国风写实画风，极致精细建模，清晰呈现面部毛孔、自然油光，皮肤纹理真实细腻，衣物布料质感分明，电影级高清画质，柔和写实光影。",
+            "scene": "抖音漫剧同款 3D 国风写实画风，极致精细建模，电影级高清画质，柔和写实光影。图中不要出现任何人物、角色。",
+            "prop": "抖音漫剧同款 3D 国风写实画风，极致精细建模，电影级高清画质。图中不要出现任何人物、角色。",
+        },
+    },
     "anim_kyoto": {
         "category": "anim",
         "prompt": "画风：商业动画画风，柔和光影效果，轻柔的赛璐珞上色，柔和的漫射光线，清晰干净的细轮廓线条，参考京都动画作品，参考石立太一动画作品，2d动画",
@@ -116,9 +129,20 @@ LEGACY_STYLE_MAP: dict[str, str] = {
 }
 
 
-def resolve_template_prompt(template_id: str) -> str:
-    """查表取 prompt。未知 id 抛 KeyError（交给调用方转成 HTTPException）。"""
-    return STYLE_TEMPLATES[template_id]["prompt"]
+def resolve_template_prompt(template_id: str, asset_type: AssetPromptType | None = None) -> str:
+    """查表取 prompt。未知 id 抛 KeyError（交给调用方转成 HTTPException）。
+
+    asset_type 传入 character / scene / prop 时，优先返回该风格下的资产类型专属
+    prompt；未配置则回退通用 prompt，兼容旧模板。
+    """
+    template = STYLE_TEMPLATES[template_id]
+    if asset_type:
+        asset_prompts = template.get("asset_prompts") or {}
+        if isinstance(asset_prompts, dict):
+            scoped = asset_prompts.get(asset_type)
+            if isinstance(scoped, str) and scoped.strip():
+                return scoped
+    return template["prompt"]
 
 
 def is_known_template(template_id: str) -> bool:

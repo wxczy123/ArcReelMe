@@ -901,6 +901,30 @@ describe("API.referenceVideos", () => {
     expect(res.task_id).toBe("t-1");
   });
 
+  it("uploadReferenceVideoUnit posts multipart form data", async () => {
+    const unit = mkUnit("E1U1");
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          unit,
+          file_path: "reference_videos/E1U1.mp4",
+          version: 1,
+          asset_fingerprints: { "reference_videos/E1U1.mp4": 123 },
+        }),
+        { status: 200 },
+      ),
+    );
+    const file = new File(["mp4"], "manual.mp4", { type: "video/mp4" });
+    const res = await API.uploadReferenceVideoUnit("proj", 1, "E1U1", file);
+    expect(res.file_path).toBe("reference_videos/E1U1.mp4");
+    expect(res.version).toBe(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/v1/projects/proj/reference-videos/episodes/1/units/E1U1/upload");
+    expect(init!.method).toBe("POST");
+    expect(init!.body).toBeInstanceOf(FormData);
+    expect((init!.body as FormData).get("file")).toBe(file);
+  });
+
   it("deleteReferenceVideoUnit returns void on 204", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
     await expect(API.deleteReferenceVideoUnit("proj", 1, "E1U1")).resolves.toBeUndefined();

@@ -849,6 +849,8 @@ export default {
   'reference_preview_empty_unit': 'Chưa được tạo',
   'reference_preview_regenerate': 'Tạo lại video',
   'reference_preview_retry': 'Thử lại',
+  'reference_preview_upload_video': 'Tải video lên',
+  'reference_preview_upload_video_success': 'Đã tải video lên',
   'reference_meta_status': 'Trạng thái',
   'reference_meta_cost': 'Chi phí',
   'reference_meta_cost_spent': 'đã chi',

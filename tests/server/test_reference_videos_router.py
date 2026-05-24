@@ -283,6 +283,90 @@ def test_generate_unit_missing_returns_404(client: TestClient):
     assert resp.status_code == 404
 
 
+def test_upload_unit_video_updates_assets(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    uid = _seed_unit(client)
+
+    from server.routers import reference_videos as router_mod
+
+    async def _fake_extract(_video_path: Path, thumbnail_path: Path):
+        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+        thumbnail_path.write_bytes(b"jpg")
+        return thumbnail_path
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(router_mod, "extract_video_thumbnail", _fake_extract)
+    monkeypatch.setattr(
+        router_mod,
+        "emit_project_change_batch",
+        lambda project_name, changes, source="webui": emitted.append(
+            {"project_name": project_name, "changes": list(changes), "source": source}
+        ),
+    )
+
+    resp = client.post(
+        f"/api/v1/projects/demo/reference-videos/episodes/1/units/{uid}/upload",
+        files={"file": ("manual.mp4", b"mp4-bytes", "video/mp4")},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    unit = data["unit"]
+    assert unit["generated_assets"]["video_clip"] == f"reference_videos/{uid}.mp4"
+    assert unit["generated_assets"]["video_thumbnail"] == f"reference_videos/thumbnails/{uid}.jpg"
+    assert unit["generated_assets"]["status"] == "completed"
+    assert data["file_path"] == f"reference_videos/{uid}.mp4"
+    assert data["version"] == 1
+    assert f"reference_videos/{uid}.mp4" in data["asset_fingerprints"]
+    assert f"reference_videos/thumbnails/{uid}.jpg" in data["asset_fingerprints"]
+
+    project_dir = tmp_path / "projects" / "demo"
+    assert (project_dir / "reference_videos" / f"{uid}.mp4").read_bytes() == b"mp4-bytes"
+    assert (project_dir / "versions" / "reference_videos").exists()
+    assert emitted[0]["source"] == "webui"
+    assert emitted[0]["changes"][0]["action"] == "reference_video_ready"
+
+
+def test_upload_unit_video_rejects_non_mp4(client: TestClient):
+    uid = _seed_unit(client)
+    resp = client.post(
+        f"/api/v1/projects/demo/reference-videos/episodes/1/units/{uid}/upload",
+        files={"file": ("manual.mov", b"mov-bytes", "video/quicktime")},
+    )
+    assert resp.status_code == 400
+    assert ".mp4" in resp.json()["detail"]
+
+
+def test_backfill_existing_unit_video_marks_unit_completed(tmp_path: Path):
+    from server.routers.reference_videos import _backfill_existing_unit_videos
+
+    unit_id = "E1U01"
+    project_path = tmp_path / "demo"
+    video_path = project_path / "reference_videos" / f"{unit_id}.mp4"
+    thumb_path = project_path / "reference_videos" / "thumbnails" / f"{unit_id}.jpg"
+    video_path.parent.mkdir(parents=True)
+    thumb_path.parent.mkdir(parents=True)
+    video_path.write_bytes(b"mp4")
+    thumb_path.write_bytes(b"jpg")
+    script = {
+        "video_units": [
+            {
+                "unit_id": unit_id,
+                "generated_assets": {"video_clip": None, "status": "pending"},
+            }
+        ]
+    }
+
+    assert _backfill_existing_unit_videos(project_path, script) is True
+    assets = script["video_units"][0]["generated_assets"]
+    assert assets["video_clip"] == f"reference_videos/{unit_id}.mp4"
+    assert assets["video_thumbnail"] == f"reference_videos/thumbnails/{unit_id}.jpg"
+    assert assets["status"] == "completed"
+    assert _backfill_existing_unit_videos(project_path, script) is False
+
+
 def test_add_unit_stale_script_file_returns_404(client: TestClient, tmp_path: Path):
     """project.json 残留指向已删除文件的 script_file 时，写端点应返回 404 而非 500。"""
     (tmp_path / "projects" / "demo" / "scripts" / "episode_1.json").unlink()

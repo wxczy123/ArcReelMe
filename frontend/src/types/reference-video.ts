@@ -58,6 +58,7 @@ export interface UnitGeneratedAssets {
   grid_id: string | null;
   grid_cell_index: number | null;
   video_clip: string | null;
+  video_thumbnail?: string | null;
   video_uri: string | null;
   /** Raw backend status — use `UnitStatus` for UI display. */
   status: UnitPersistedStatus;

@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from lib.character_assets import CHARACTER_REF_SLOTS, ensure_character_forms
+from lib.project_manager import effective_mode
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ class StatusCalculator:
         script_file: str,
         *,
         content_mode: str = "narration",
+        generation_mode: str | None = None,
         preloaded_scripts: dict[str, dict] | None = None,
     ) -> tuple:
         """加载单集剧本，返回 (script_status, script|None)，避免重复读取文件。
@@ -140,7 +142,10 @@ class StatusCalculator:
                 safe_num = int(episode_num)
             except (ValueError, TypeError):
                 return "none", None
-            draft_filename = "step1_segments.md" if content_mode == "narration" else "step1_normalized_script.md"
+            if generation_mode == "reference_video":
+                draft_filename = "step1_reference_units.md"
+            else:
+                draft_filename = "step1_segments.md" if content_mode == "narration" else "step1_normalized_script.md"
             draft_file = project_dir / f"drafts/episode_{safe_num}/{draft_filename}"
             return ("segmented" if draft_file.exists() else "none"), None
         except ValueError as e:
@@ -241,6 +246,7 @@ class StatusCalculator:
         for ep in project.get("episodes", []):
             script_file = ep.get("script_file", "")
             episode_num = ep.get("episode", 0)
+            generation_mode = effective_mode(project=project, episode=ep if isinstance(ep, dict) else {})
 
             if script_file:
                 script_status, script = self._load_episode_script(
@@ -248,6 +254,7 @@ class StatusCalculator:
                     episode_num,
                     script_file,
                     content_mode=content_mode,
+                    generation_mode=generation_mode,
                     preloaded_scripts=preloaded_scripts,
                 )
             else:

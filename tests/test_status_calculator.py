@@ -122,6 +122,21 @@ class TestStatusCalculator:
         assert status5 == "none"
         assert script5 is None
 
+        # Case 6: reference_video 模式 — step1_reference_units.md 存在 → ("segmented", None)
+        draft_dir_ref = project_path / "drafts" / "episode_6"
+        draft_dir_ref.mkdir(parents=True)
+        (draft_dir_ref / "step1_reference_units.md").write_text("reference units")
+        calc6 = StatusCalculator(_FakePM(project_root, {}, {}))
+        status6, script6 = calc6._load_episode_script(
+            "demo",
+            6,
+            "scripts/episode_6.json",
+            content_mode="drama",
+            generation_mode="reference_video",
+        )
+        assert status6 == "segmented"
+        assert script6 is None
+
     def test_calculate_current_phase_setup(self, tmp_path):
         calc = StatusCalculator(_FakePM(tmp_path, {}, {}))
         project_no_overview = {}

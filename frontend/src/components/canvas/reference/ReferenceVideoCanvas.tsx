@@ -72,6 +72,7 @@ export function ReferenceVideoCanvas({
   const addUnit = useReferenceVideoStore((s) => s.addUnit);
   const patchUnit = useReferenceVideoStore((s) => s.patchUnit);
   const generate = useReferenceVideoStore((s) => s.generate);
+  const uploadVideo = useReferenceVideoStore((s) => s.uploadVideo);
   const select = useReferenceVideoStore((s) => s.select);
 
   const units =
@@ -85,6 +86,7 @@ export function ReferenceVideoCanvas({
   // Drafts persist across unit switches; entry is dropped when text matches server value.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [uploadingVideoUnitId, setUploadingVideoUnitId] = useState<string | null>(null);
 
   const relevantTasks = useTasksStore(
     useShallow((s) =>
@@ -124,9 +126,11 @@ export function ReferenceVideoCanvas({
     for (const u of units) {
       let st: UnitStatus = u.generated_assets.video_clip ? "ready" : "pending";
       const queueRow = tasksByUnit.get(u.unit_id);
-      if (queueRow?.status === "queued" || queueRow?.status === "running") st = "running";
-      else if (queueRow?.status === "failed") st = "failed";
-      else if (optimisticUnitIds.has(u.unit_id) && !queueRow) st = "running";
+      if (!u.generated_assets.video_clip) {
+        if (queueRow?.status === "queued" || queueRow?.status === "running") st = "running";
+        else if (queueRow?.status === "failed") st = "failed";
+        else if (optimisticUnitIds.has(u.unit_id) && !queueRow) st = "running";
+      }
       map[u.unit_id] = st;
     }
     return map;
@@ -203,6 +207,26 @@ export function ReferenceVideoCanvas({
 
   const onAdd = useCallback(() => void handleAdd(), [handleAdd]);
   const onGenerateVoid = useCallback((id: string) => void handleGenerate(id), [handleGenerate]);
+  const handleUploadVideo = useCallback(
+    async (unitId: string, file: File) => {
+      setUploadingVideoUnitId(unitId);
+      try {
+        await uploadVideo(projectName, episode, unitId, file);
+        setOptimisticUnitIds((s) => {
+          if (!s.has(unitId)) return s;
+          const next = new Set(s);
+          next.delete(unitId);
+          return next;
+        });
+        useAppStore.getState().pushToast(t("reference_preview_upload_video_success"), "success");
+      } catch (e) {
+        toastError(e);
+      } finally {
+        setUploadingVideoUnitId(null);
+      }
+    },
+    [uploadVideo, projectName, episode, t],
+  );
 
   const handlePromptChange = useCallback(
     (next: string) => {
@@ -719,6 +743,8 @@ export function ReferenceVideoCanvas({
                           estimatedCost={estimatedCost}
                           actualCost={actualCost}
                           onGenerate={onGenerateVoid}
+                          onUpload={(unitId, file) => void handleUploadVideo(unitId, file)}
+                          uploading={uploadingVideoUnitId === selected.unit_id}
                         />
                       </div>
                     )}
@@ -742,6 +768,8 @@ export function ReferenceVideoCanvas({
                   estimatedCost={estimatedCost}
                   actualCost={actualCost}
                   onGenerate={onGenerateVoid}
+                  onUpload={(unitId, file) => void handleUploadVideo(unitId, file)}
+                  uploading={selected ? uploadingVideoUnitId === selected.unit_id : false}
                 />
               </div>
             )}

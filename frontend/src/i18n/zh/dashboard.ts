@@ -884,6 +884,8 @@ export default {
   'reference_preview_empty_unit': '尚未生成',
   'reference_preview_regenerate': '重新生成视频',
   'reference_preview_retry': '重试生成',
+  'reference_preview_upload_video': '上传视频',
+  'reference_preview_upload_video_success': '视频已上传',
   'reference_meta_status': '状态',
   'reference_meta_cost': '成本',
   'reference_meta_cost_spent': '已花费',

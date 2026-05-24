@@ -602,11 +602,12 @@ def _extract_step_number(filename: str) -> int:
 def _get_step_files(content_mode: str, generation_mode: str | None = None) -> dict:
     """根据 generation_mode / content_mode 获取步骤文件名映射
 
-    reference_video 走 split-reference-video-units subagent → step1_reference_units.md，
+    reference_video 先走 adapt-reference-video-episode 产出 step0_episode_adaptation.md，
+    再走 split-reference-video-units 产出 step1_reference_units.md；
     其他模式回落到 content_mode 的 narration/drama 分支。
     """
     if generation_mode == "reference_video":
-        return {1: "step1_reference_units.md"}
+        return {0: "step0_episode_adaptation.md", 1: "step1_reference_units.md"}
     if content_mode == "narration":
         return {1: "step1_segments.md"}
     return {1: "step1_normalized_script.md"}
@@ -623,6 +624,7 @@ _STEP1_CANDIDATES = [
 def _get_step_title(filename: str, _t: Callable[..., str]) -> str:
     """获取步骤标题"""
     titles = {
+        "step0_episode_adaptation.md": _t("episode_adaptation"),
         "step1_normalized_script.md": _t("normalized_script"),
         "step1_segments.md": _t("segment_splitting"),
         "step1_reference_units.md": _t("segment_splitting"),
@@ -723,7 +725,7 @@ async def update_draft_content(
 
             # 发射 draft 事件通知前端
             action = "created" if is_new else "updated"
-            label_prefix = _t("segment_splitting") if content_mode == "narration" else _t("normalized_script")
+            label_prefix = _get_step_title(draft_path.name, _t)
             change = {
                 "entity_type": "draft",
                 "action": action,

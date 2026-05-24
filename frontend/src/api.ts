@@ -2065,6 +2065,33 @@ class API {
       { method: "POST" },
     );
   }
+
+  /** Upload a manually generated reference-video result for a unit. */
+  static async uploadReferenceVideoUnit(
+    projectName: string,
+    episode: number,
+    unitId: string,
+    file: File,
+  ): Promise<{
+    unit: ReferenceVideoUnit;
+    file_path: string;
+    version: number;
+    asset_fingerprints?: Record<string, number>;
+  }> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(
+      `${API_BASE}/projects/${encodeURIComponent(projectName)}/reference-videos/episodes/${episode}/units/${encodeURIComponent(unitId)}/upload`,
+      withAuth({ method: "POST", body: form }),
+    );
+    await throwIfNotOk(response, "上传失败");
+    return response.json() as Promise<{
+      unit: ReferenceVideoUnit;
+      file_path: string;
+      version: number;
+      asset_fingerprints?: Record<string, number>;
+    }>;
+  }
 }
 
 export { API };

@@ -12,6 +12,7 @@ const ENTITY_LABELS: Record<ProjectChange["entity_type"], string> = {
   overview: "项目概览",
   draft: "预处理",
   grid: "宫格",
+  reference_video_unit: "参考视频",
 };
 
 export interface GroupedProjectChange {
@@ -77,6 +78,9 @@ function getEntityLabel(group: GroupedProjectChange): string {
   if (group.action === "grid_ready") {
     return "宫格";
   }
+  if (group.action === "reference_video_ready") {
+    return "参考视频";
+  }
   return ENTITY_LABELS[group.entityType] ?? "内容";
 }
 
@@ -85,7 +89,8 @@ function getChangeListLabel(change: ProjectChange): string {
     change.entity_type === "character" ||
     change.entity_type === "scene" ||
     change.entity_type === "prop" ||
-    change.entity_type === "segment"
+    change.entity_type === "segment" ||
+    change.entity_type === "reference_video_unit"
   ) {
     return change.entity_id;
   }
@@ -108,6 +113,9 @@ function formatSingleNotificationText(change: ProjectChange): string {
   if (change.action === "grid_ready") {
     return `${change.label}已生成`;
   }
+  if (change.action === "reference_video_ready") {
+    return `${change.label}已生成`;
+  }
   if (change.action === "created") {
     return `${change.label}已创建`;
   }
@@ -126,6 +134,9 @@ function formatSingleDeferredText(change: ProjectChange): string {
   }
   if (change.action === "grid_ready") {
     return `${change.label} 已生成`;
+  }
+  if (change.action === "reference_video_ready") {
+    return `AI 刚生成了 ${change.label}，点击查看`;
   }
   if (change.action === "created") {
     return `AI 刚新增了 ${change.label}，点击查看`;
@@ -147,7 +158,12 @@ export function formatGroupedNotificationText(
   const entityLabel = getEntityLabel(group);
   const summary = summarizeGroupNames(group);
 
-  if (group.action === "storyboard_ready" || group.action === "video_ready" || group.action === "grid_ready") {
+  if (
+    group.action === "storyboard_ready" ||
+    group.action === "video_ready" ||
+    group.action === "grid_ready" ||
+    group.action === "reference_video_ready"
+  ) {
     return `已生成 ${count} 个${entityLabel}：${summary}`;
   }
   if (group.action === "created") {
@@ -170,7 +186,12 @@ export function formatGroupedDeferredText(
   const entityLabel = getEntityLabel(group);
   const summary = summarizeGroupNames(group);
 
-  if (group.action === "storyboard_ready" || group.action === "video_ready" || group.action === "grid_ready") {
+  if (
+    group.action === "storyboard_ready" ||
+    group.action === "video_ready" ||
+    group.action === "grid_ready" ||
+    group.action === "reference_video_ready"
+  ) {
     return `AI 刚生成了 ${count} 个${entityLabel}：${summary}，点击查看`;
   }
   if (group.action === "created") {

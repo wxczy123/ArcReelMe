@@ -6,6 +6,7 @@ import { API, type ProjectEventStreamOptions } from "@/api";
 import { useProjectEventsSSE } from "./useProjectEventsSSE";
 import { useAppStore } from "@/stores/app-store";
 import { useProjectsStore } from "@/stores/projects-store";
+import { useReferenceVideoStore } from "@/stores/reference-video-store";
 
 function HookHarness({ projectName }: { projectName: string }) {
   useProjectEventsSSE(projectName);
@@ -27,6 +28,7 @@ describe("useProjectEventsSSE", () => {
     document.body.innerHTML = "";
     useAppStore.setState(useAppStore.getInitialState(), true);
     useProjectsStore.setState(useProjectsStore.getInitialState(), true);
+    useReferenceVideoStore.setState(useReferenceVideoStore.getInitialState(), true);
     vi.restoreAllMocks();
     vi.spyOn(API, "getProject").mockResolvedValue({
       project: {
@@ -426,5 +428,46 @@ describe("useProjectEventsSSE", () => {
 
     // fingerprints 应立即（同步）写入 store，无需等待 getProject
     expect(useProjectsStore.getState().getAssetFingerprint("storyboards/scene_E1S01.png")).toBe(1710288000);
+  });
+
+  it("reloads reference video units when a reference_video_ready change arrives", async () => {
+    let capturedOptions: ProjectEventStreamOptions | undefined;
+    vi.spyOn(API, "openProjectEventStream").mockImplementation((options) => {
+      capturedOptions = options;
+      return { close: vi.fn() } as unknown as EventSource;
+    });
+    vi.spyOn(API, "listReferenceVideoUnits").mockResolvedValueOnce({ units: [] });
+
+    renderHarness("/episodes/1");
+
+    act(() => {
+      capturedOptions?.onChanges?.(
+        {
+          project_name: "demo",
+          batch_id: "batch-ref",
+          fingerprint: "fp-ref",
+          generated_at: "2026-03-01T00:00:00Z",
+          source: "worker",
+          changes: [
+            {
+              entity_type: "reference_video_unit",
+              action: "reference_video_ready",
+              entity_id: "E1U1",
+              label: "参考视频「E1U1」",
+              focus: null,
+              episode: 1,
+              important: true,
+              asset_fingerprints: { "reference_videos/E1U1.mp4": 1710289000 },
+            },
+          ],
+        },
+        new MessageEvent("changes"),
+      );
+    });
+
+    await waitFor(() => {
+      expect(API.listReferenceVideoUnits).toHaveBeenCalledWith("demo", 1);
+    });
+    expect(useProjectsStore.getState().getAssetFingerprint("reference_videos/E1U1.mp4")).toBe(1710289000);
   });
 });

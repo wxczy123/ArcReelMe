@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Film, Loader2, Sparkles, RotateCcw, AlertTriangle } from "lucide-react";
+import { Film, Loader2, Sparkles, RotateCcw, AlertTriangle, Upload } from "lucide-react";
 import { API } from "@/api";
 import { formatCost } from "@/utils/cost-format";
 import { StatusBadge, deriveUnitStatus } from "./unit-status";
@@ -18,6 +19,8 @@ export interface UnitPreviewPanelProps {
   /** Actual already-spent cost; rendered in the metadata block. */
   actualCost?: CostBreakdown;
   onGenerate?: (unitId: string) => void;
+  onUpload?: (unitId: string, file: File) => void | Promise<void>;
+  uploading?: boolean;
 }
 
 function hasCost(b: CostBreakdown | undefined): boolean {
@@ -34,8 +37,11 @@ export function UnitPreviewPanel({
   estimatedCost,
   actualCost,
   onGenerate,
+  onUpload,
+  uploading = false,
 }: UnitPreviewPanelProps) {
   const { t } = useTranslation("dashboard");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!unit) {
     return (
@@ -148,38 +154,72 @@ export function UnitPreviewPanel({
         )}
       </div>
 
-      {onGenerate && (
-        <button
-          type="button"
-          onClick={() => onGenerate(unit.unit_id)}
-          disabled={inFlight}
-          className={`focus-ring inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-semibold transition-colors ${
-            inFlight
-              ? "cursor-not-allowed border border-[var(--color-hairline)] bg-[oklch(0.22_0.011_265_/_0.6)] text-[var(--color-text-3)]"
-              : "text-[oklch(0.14_0_0)] [background:linear-gradient(180deg,var(--color-accent-2),var(--color-accent))] shadow-[inset_0_1px_0_oklch(1_0_0_/_0.3),0_4px_14px_-4px_var(--color-accent-glow)]"
-          }`}
-        >
-          {inFlight ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              <span>{t("reference_preview_generating")}</span>
-            </>
-          ) : (
-            <>
-              {failed ? (
-                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+      {(onGenerate || onUpload) && (
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+          {onGenerate && (
+            <button
+              type="button"
+              onClick={() => onGenerate(unit.unit_id)}
+              disabled={inFlight}
+              className={`focus-ring inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+                inFlight
+                  ? "cursor-not-allowed border border-[var(--color-hairline)] bg-[oklch(0.22_0.011_265_/_0.6)] text-[var(--color-text-3)]"
+                  : "text-[oklch(0.14_0_0)] [background:linear-gradient(180deg,var(--color-accent-2),var(--color-accent))] shadow-[inset_0_1px_0_oklch(1_0_0_/_0.3),0_4px_14px_-4px_var(--color-accent-glow)]"
+              }`}
+            >
+              {inFlight ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  <span>{t("reference_preview_generating")}</span>
+                </>
               ) : (
-                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                <>
+                  {failed ? (
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  <span>{ctaLabel}</span>
+                  {hasCost(estimatedCost) && (
+                    <span className="ml-1 font-mono text-[11px] tabular-nums opacity-70">
+                      ≈ {formatCost(estimatedCost)}
+                    </span>
+                  )}
+                </>
               )}
-              <span>{ctaLabel}</span>
-              {hasCost(estimatedCost) && (
-                <span className="ml-1 font-mono text-[11px] tabular-nums opacity-70">
-                  ≈ {formatCost(estimatedCost)}
-                </span>
-              )}
+            </button>
+          )}
+          {onUpload && (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title={t("reference_preview_upload_video")}
+                aria-label={t("reference_preview_upload_video")}
+                className="focus-ring inline-flex h-[42px] w-[42px] items-center justify-center rounded-lg border border-[var(--color-hairline)] bg-[oklch(0.22_0.011_265_/_0.65)] text-[var(--color-text-2)] transition-colors hover:bg-[oklch(0.26_0.013_265_/_0.8)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {uploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Upload className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".mp4,video/mp4"
+                className="hidden"
+                aria-label={t("reference_preview_upload_video")}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void onUpload(unit.unit_id, file);
+                }}
+              />
             </>
           )}
-        </button>
+        </div>
       )}
 
       <div className="rounded-lg border border-[var(--color-hairline-soft)] bg-[oklch(0.18_0.010_265_/_0.5)] p-3">

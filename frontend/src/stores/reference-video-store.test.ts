@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { act } from "@testing-library/react";
 import { useReferenceVideoStore } from "./reference-video-store";
 import { API } from "@/api";
+import { useProjectsStore } from "@/stores/projects-store";
 import type { ReferenceVideoUnit } from "@/types";
 
 function mkUnit(id: string, overrides: Partial<ReferenceVideoUnit> = {}): ReferenceVideoUnit {
@@ -34,6 +35,7 @@ describe("reference-video-store", () => {
       loading: false,
       error: null,
     });
+    useProjectsStore.setState(useProjectsStore.getInitialState(), true);
   });
 
   afterEach(() => {
@@ -128,6 +130,42 @@ describe("reference-video-store", () => {
 
     expect(useReferenceVideoStore.getState().unitsByEpisode["proj::1"].map((u) => u.unit_id))
       .toEqual(["E1U2", "E1U1"]);
+  });
+
+  it("uploadVideo replaces unit and updates asset fingerprints", async () => {
+    useReferenceVideoStore.setState({
+      unitsByEpisode: { "proj::1": [mkUnit("E1U1")] },
+      selectedUnitId: "E1U1",
+      loading: false,
+      error: null,
+    });
+    const uploaded = mkUnit("E1U1", {
+      generated_assets: {
+        ...mkUnit("E1U1").generated_assets,
+        video_clip: "reference_videos/E1U1.mp4",
+        video_thumbnail: "reference_videos/thumbnails/E1U1.jpg",
+        status: "completed",
+      },
+    });
+    vi.spyOn(API, "uploadReferenceVideoUnit").mockResolvedValueOnce({
+      unit: uploaded,
+      file_path: "reference_videos/E1U1.mp4",
+      version: 1,
+      asset_fingerprints: { "reference_videos/E1U1.mp4": 123 },
+    });
+
+    await act(async () => {
+      await useReferenceVideoStore.getState().uploadVideo(
+        "proj",
+        1,
+        "E1U1",
+        new File(["mp4"], "manual.mp4", { type: "video/mp4" }),
+      );
+    });
+
+    const unit = useReferenceVideoStore.getState().unitsByEpisode["proj::1"][0];
+    expect(unit.generated_assets.video_clip).toBe("reference_videos/E1U1.mp4");
+    expect(useProjectsStore.getState().getAssetFingerprint("reference_videos/E1U1.mp4")).toBe(123);
   });
 
   it("select sets selectedUnitId", () => {

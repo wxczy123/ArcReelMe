@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { UnitPreviewPanel } from "./UnitPreviewPanel";
 import type { ReferenceVideoUnit } from "@/types";
 
@@ -48,5 +48,21 @@ describe("UnitPreviewPanel", () => {
       <UnitPreviewPanel unit={unit} projectName="proj" />,
     );
     expect(container.querySelector("video")).toBeInTheDocument();
+  });
+
+  it("calls onUpload when a video file is selected", async () => {
+    const onUpload = vi.fn();
+    render(<UnitPreviewPanel unit={mkUnit()} onUpload={onUpload} />);
+    const file = new File(["mp4"], "manual.mp4", { type: "video/mp4" });
+    const input = screen
+      .getAllByLabelText(/Upload video|上传视频/)
+      .find((el): el is HTMLInputElement => el instanceof HTMLInputElement);
+    expect(input).toBeDefined();
+    fireEvent.change(input!, {
+      target: { files: [file] },
+    });
+    await waitFor(() => {
+      expect(onUpload).toHaveBeenCalledWith("E1U1", file);
+    });
   });
 });

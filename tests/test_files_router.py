@@ -45,6 +45,7 @@ def _client(monkeypatch, tmp_path):
     pm.create_project("demo")
     pm.create_project_metadata("demo", "Demo", "Anime", "narration")
     pm.add_character("demo", "Alice", "desc")
+    pm.add_project_scene("demo", "庭院", "古宅庭院")
     pm.add_prop("demo", "玉佩", "古玉")
 
     monkeypatch.setattr(files, "get_project_manager", lambda: pm)
@@ -119,6 +120,13 @@ class TestFilesRouter:
             assert clue.status_code == 200
             assert clue.json()["path"] == "props/玉佩.jpg"
 
+            scene = client.post(
+                "/api/v1/projects/demo/upload/scene?name=庭院",
+                files={"file": ("scene.jpg", _img_bytes("JPEG"), "image/jpeg")},
+            )
+            assert scene.status_code == 200
+            assert scene.json()["path"] == "scenes/庭院.jpg"
+
             storyboard = client.post(
                 "/api/v1/projects/demo/upload/storyboard?name=E1S01",
                 files={"file": ("storyboard.jpg", _img_bytes("JPEG"), "image/jpeg")},
@@ -175,6 +183,7 @@ class TestFilesRouter:
             default_form = project["characters"]["Alice"]["forms"]["default"]
             assert default_form["refs"]["full_body"]["path"] == "characters/Alice.jpg"
             assert default_form["input_refs"] == ["characters/refs/Alice.webp"]
+            assert project["scenes"]["庭院"]["scene_sheet"] == "scenes/庭院.jpg"
             assert project["props"]["玉佩"]["prop_sheet"] == "props/玉佩.jpg"
 
     def test_style_image_endpoints(self, tmp_path, monkeypatch):
@@ -344,11 +353,18 @@ class TestFilesRouter:
         assert files._extract_step_number("not-match.md") == 0
         assert files._get_step_files("narration") == {1: "step1_segments.md"}
         assert files._get_step_files("drama") == {1: "step1_normalized_script.md"}
-        # reference_video 走独立的 step1 文件
-        assert files._get_step_files("drama", "reference_video") == {1: "step1_reference_units.md"}
-        assert files._get_step_files("narration", "reference_video") == {1: "step1_reference_units.md"}
+        # reference_video 先有单集改编规划，再有 reference units 文件
+        assert files._get_step_files("drama", "reference_video") == {
+            0: "step0_episode_adaptation.md",
+            1: "step1_reference_units.md",
+        }
+        assert files._get_step_files("narration", "reference_video") == {
+            0: "step0_episode_adaptation.md",
+            1: "step1_reference_units.md",
+        }
         # 其他 generation_mode 回落到 content_mode
         assert files._get_step_files("narration", "storyboard") == {1: "step1_segments.md"}
+        assert files._get_step_title("step0_episode_adaptation.md", _t) == "单集改编规划"
         assert files._get_step_title("step1_segments.md", _t) == "片段拆分"
         assert files._get_step_title("step1_normalized_script.md", _t) == "规范化剧本"
         assert files._get_step_title("step1_reference_units.md", _t) == "片段拆分"
@@ -367,9 +383,22 @@ class TestFilesRouter:
 
         drafts_dir = project_dir / "drafts" / "episode_1"
         drafts_dir.mkdir(parents=True, exist_ok=True)
+        (drafts_dir / "step0_episode_adaptation.md").write_text("adaptation stub", encoding="utf-8")
         (drafts_dir / "step1_reference_units.md").write_text("E1U1 stub", encoding="utf-8")
 
         with client:
+            plan_resp = client.get("/api/v1/projects/demo/drafts/1/step0")
+            assert plan_resp.status_code == 200
+            assert plan_resp.text == "adaptation stub"
+
+            plan_update = client.put(
+                "/api/v1/projects/demo/drafts/1/step0",
+                content="adaptation edited",
+                headers={"content-type": "text/plain"},
+            )
+            assert plan_update.status_code == 200
+            assert plan_update.json()["path"] == "drafts/episode_1/step0_episode_adaptation.md"
+
             resp = client.get("/api/v1/projects/demo/drafts/1/step1")
             assert resp.status_code == 200
             assert resp.text == "E1U1 stub"

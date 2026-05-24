@@ -883,6 +883,8 @@ export default {
   'reference_preview_empty_unit': 'Not yet generated',
   'reference_preview_regenerate': 'Regenerate video',
   'reference_preview_retry': 'Retry generation',
+  'reference_preview_upload_video': 'Upload video',
+  'reference_preview_upload_video_success': 'Video uploaded',
   'reference_meta_status': 'Status',
   'reference_meta_cost': 'Cost',
   'reference_meta_cost_spent': 'spent',

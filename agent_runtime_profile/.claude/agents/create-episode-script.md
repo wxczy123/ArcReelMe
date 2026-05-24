@@ -32,7 +32,9 @@ skills:
 使用 Glob 工具确认中间文件存在：
 - narration 模式：`drafts/episode_{N}/step1_segments.md`
 - drama 模式：`drafts/episode_{N}/step1_normalized_script.md`
-- reference_video 模式：`drafts/episode_{N}/step1_reference_units.md`
+- reference_video 模式：
+  - `drafts/episode_{N}/step0_episode_adaptation.md`
+  - `drafts/episode_{N}/step1_reference_units.md`
 
 如果中间文件不存在，报告错误并说明需要先运行哪个预处理 subagent。
 

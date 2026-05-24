@@ -337,6 +337,7 @@ class TestGenerationTasks:
         assert fake_generator.image_calls[-1]["reference_images"] == [
             project_path / "characters" / "Alice" / "default" / "input_refs" / "style.png"
         ]
+        assert fake_generator.image_calls[-1]["aspect_ratio"] == "9:16"
 
         await generation_tasks.execute_character_ref_task(
             "demo",
@@ -346,6 +347,7 @@ class TestGenerationTasks:
         assert fake_generator.image_calls[-1]["reference_images"] == [
             project_path / "characters" / "Alice" / "default" / "full_body.png"
         ]
+        assert fake_generator.image_calls[-1]["aspect_ratio"] == "16:9"
 
         fake_pm.project["characters"]["Alice"]["forms"]["default"]["refs"]["full_body"]["path"] = ""
         await generation_tasks.execute_character_ref_task(
@@ -557,9 +559,13 @@ class TestGetAspectRatio:
         assert generation_tasks.get_aspect_ratio(project, "videos") == "16:9"
 
     def test_characters_always_16_9(self):
-        # 角色采用四视图横版（issue #353）
+        # 旧角色图入口仍固定横版；新 character_refs 槽位比例另由 get_character_ref_aspect_ratio 决定。
         project = {"aspect_ratio": "9:16"}
         assert generation_tasks.get_aspect_ratio(project, "characters") == "16:9"
+
+    def test_character_ref_aspect_ratio_depends_on_slot(self):
+        assert generation_tasks.get_character_ref_aspect_ratio("full_body") == "9:16"
+        assert generation_tasks.get_character_ref_aspect_ratio("three_view") == "16:9"
 
     def test_scenes_and_props_always_16_9(self):
         project = {"aspect_ratio": "9:16"}

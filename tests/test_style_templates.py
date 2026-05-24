@@ -11,11 +11,11 @@ from lib.style_templates import (
 
 
 def test_templates_count_and_categories():
-    assert len(STYLE_TEMPLATES) == 36
+    assert len(STYLE_TEMPLATES) == 37
     lives = [t for t in STYLE_TEMPLATES.values() if t["category"] == "live"]
     anims = [t for t in STYLE_TEMPLATES.values() if t["category"] == "anim"]
     assert len(lives) == 18
-    assert len(anims) == 18
+    assert len(anims) == 19
 
 
 def test_template_ids_unique_and_slug_shaped():
@@ -38,6 +38,24 @@ def test_resolve_template_prompt_ok():
     assert "精品短剧" in prompt or "真人电视剧" in prompt
 
 
+def test_resolve_template_prompt_scoped_asset_prompts():
+    character = resolve_template_prompt("anim_cn_3d_realistic", "character")
+    scene = resolve_template_prompt("anim_cn_3d_realistic", "scene")
+    prop = resolve_template_prompt("anim_cn_3d_realistic", "prop")
+
+    assert "清晰呈现面部毛孔" in character
+    assert "自然油光" in character
+    assert "图中不要出现任何人物、角色" in scene
+    assert "图中不要出现任何人物、角色" in prop
+    assert "清晰呈现面部毛孔" not in scene
+    assert "衣物布料质感分明" not in prop
+
+
+def test_resolve_template_prompt_scoped_falls_back_to_common_prompt():
+    common = resolve_template_prompt("live_premium_drama")
+    assert resolve_template_prompt("live_premium_drama", "scene") == common
+
+
 def test_resolve_template_prompt_unknown_raises():
     with pytest.raises(KeyError):
         resolve_template_prompt("no_such_id")
@@ -47,5 +65,5 @@ def test_list_templates_by_category():
     grouped = list_templates_by_category()
     assert set(grouped.keys()) == {"live", "anim"}
     assert len(grouped["live"]) == 18
-    assert len(grouped["anim"]) == 18
+    assert len(grouped["anim"]) == 19
     assert grouped["live"][0]["id"].startswith("live_")

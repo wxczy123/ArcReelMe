@@ -54,6 +54,7 @@ from lib.storyboard_sequence import (
     group_scenes_by_segment_break,
     resolve_previous_storyboard_path,
 )
+from lib.style_templates import resolve_template_prompt
 from lib.thumbnail import extract_video_thumbnail
 from server.services.resolution_resolver import resolve_resolution
 
@@ -422,7 +423,7 @@ async def get_media_generator(
 
 def get_aspect_ratio(project: dict, resource_type: str) -> str:
     if resource_type in {"characters", "character_refs"}:
-        # 角色参考图固定横版，方便全身图/三视图复用。
+        # 旧角色图 / 未指定槽位的角色参考图仍固定横版，避免影响旧入口。
         return "16:9"
     if resource_type in ("scenes", "props"):
         return "16:9"
@@ -433,6 +434,11 @@ def get_aspect_ratio(project: dict, resource_type: str) -> str:
     if isinstance(val, dict) and resource_type in val:
         return val[resource_type]
     return "9:16" if project.get("content_mode", "narration") == "narration" else "16:9"
+
+
+def get_character_ref_aspect_ratio(slot: str) -> str:
+    """角色参考图按槽位指定默认比例。"""
+    return "9:16" if slot == "full_body" else "16:9"
 
 
 def _normalize_storyboard_prompt(prompt: str | dict, style: str) -> str:
@@ -718,6 +724,18 @@ def _compute_affected_fingerprints(project_name: str, task_type: str, resource_i
             result[rel] = abs_path.stat().st_mtime_ns
 
     return result
+
+
+def _asset_style_prompt(project: dict[str, Any], asset_type: str) -> str:
+    """按资产类型解析项目风格 prompt；旧模板未配置专属 prompt 时回退通用 style。"""
+    template_id = project.get("style_template_id")
+    if isinstance(template_id, str) and template_id:
+        try:
+            scoped_type = asset_type if asset_type in {"character", "scene", "prop"} else None
+            return resolve_template_prompt(template_id, scoped_type)
+        except KeyError:
+            logger.warning("未知 style_template_id=%s，回退 project.style", template_id)
+    return str(project.get("style", "") or "")
 
 
 # (entity_type, action, label_tpl, include_script_episode)
@@ -1036,7 +1054,7 @@ async def execute_character_ref_task(
         if form_id not in _forms:
             raise ValueError(f"character form not found: {character_name}/{form_id}")
         _form = _forms[form_id]
-        _style = _project.get("style", "")
+        _style = _asset_style_prompt(_project, "character")
         _style_desc = _project.get("style_description", "")
         _base_description = prompt or _char_data.get("description", "")
         if not str(_base_description or "").strip() and not str(_form.get("description") or "").strip():
@@ -1079,7 +1097,7 @@ async def execute_character_ref_task(
     _needs_i2i = bool(reference_images)
 
     generator = await get_media_generator(project_name, payload=payload, user_id=user_id, needs_i2i=_needs_i2i)
-    aspect_ratio = get_aspect_ratio(project, "characters")
+    aspect_ratio = get_character_ref_aspect_ratio(slot)
 
     image_provider_id, image_model_id = await _resolve_effective_image_backend(project, payload, needs_i2i=_needs_i2i)
     image_size = await resolve_resolution(project, image_provider_id, image_model_id)
@@ -1160,7 +1178,7 @@ async def execute_design_task(
         project = get_project_manager().load_project(project_name)
         if resource_id not in project.get(bucket_key, {}):
             raise ValueError(f"{kind} not found: {resource_id}")
-        style = project.get("style", "")
+        style = _asset_style_prompt(project, kind)
         style_desc = project.get("style_description", "")
         full_prompt = prompt_builder(resource_id, prompt, style, style_desc)
         return project, full_prompt

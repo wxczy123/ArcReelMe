@@ -24,9 +24,10 @@ MESSAGES: dict[str, str] = {
     "template_name_live_wong": "Vương Gia Vệ",
     "template_name_live_shaw": "Shaw Brothers",
     "template_name_live_cyberpunk": "Cyberpunk Người đóng",
-    # ===== Anim names (18) =====
+    # ===== Anim names (19) =====
     "template_name_anim_3d_cg": "3D Game CG",
     "template_name_anim_cn_3d": "3D Trung Quốc",
+    "template_name_anim_cn_3d_realistic": "3D Trung Quốc hiện thực",
     "template_name_anim_kyoto": "Kyoto Animation",
     "template_name_anim_arcane": "Arcane (Sơn dầu 3D)",
     "template_name_anim_us_3d": "Hoạt hình 3D Mỹ",
@@ -62,9 +63,10 @@ MESSAGES: dict[str, str] = {
     "template_tagline_live_wong": "Hạt phim · Đô thị phương Đông",
     "template_tagline_live_shaw": "Võ hiệp HK · Chất điện ảnh",
     "template_tagline_live_cyberpunk": "Chất điện ảnh · Siêu nét",
-    # ===== Anim taglines (18) =====
+    # ===== Anim taglines (19) =====
     "template_tagline_anim_3d_cg": "Chất điện ảnh · Unreal Engine",
     "template_tagline_anim_cn_3d": "Chất điện ảnh · Unreal Engine",
+    "template_tagline_anim_cn_3d_realistic": "Douyin drama · Ánh sáng hiện thực",
     "template_tagline_anim_kyoto": "Cel mềm · Tateishi",
     "template_tagline_anim_arcane": "Arcane · Fortiche",
     "template_tagline_anim_us_3d": "Chất điện ảnh · Pixar",

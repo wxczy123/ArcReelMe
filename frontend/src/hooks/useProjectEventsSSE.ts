@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { API } from "@/api";
 import { useAppStore } from "@/stores/app-store";
 import { useProjectsStore } from "@/stores/projects-store";
+import { useReferenceVideoStore } from "@/stores/reference-video-store";
 import { useCostStore } from "@/stores/cost-store";
 import { errMsg } from "@/utils/async";
 import type {
@@ -33,17 +34,28 @@ const CHANGE_PRIORITY: Record<string, number> = {
   storyboard_ready: 7,
   video_ready: 8,
   grid_ready: 9,
+  reference_video_ready: 10,
 };
 
 function getChangePriority(change: ProjectChange): number {
-  if (change.action === "storyboard_ready" || change.action === "video_ready" || change.action === "grid_ready") {
+  if (
+    change.action === "storyboard_ready" ||
+    change.action === "video_ready" ||
+    change.action === "grid_ready" ||
+    change.action === "reference_video_ready"
+  ) {
     return CHANGE_PRIORITY[change.action] ?? Number.MAX_SAFE_INTEGER;
   }
   return CHANGE_PRIORITY[`${change.entity_type}:${change.action}`] ?? Number.MAX_SAFE_INTEGER;
 }
 
 function isNavigableChange(change: ProjectChange): boolean {
-  if (change.action === "storyboard_ready" || change.action === "video_ready" || change.action === "grid_ready") {
+  if (
+    change.action === "storyboard_ready" ||
+    change.action === "video_ready" ||
+    change.action === "grid_ready" ||
+    change.action === "reference_video_ready"
+  ) {
     return false;
   }
   return Boolean(change.focus?.anchor_type && change.focus?.anchor_id);
@@ -254,6 +266,19 @@ export function useProjectEventsSSE(projectName?: string | null): void {
           );
           invalidateEntities(invalidationKeys);
 
+          const referenceVideoEpisodes = new Set<number>();
+          for (const change of payload.changes) {
+            if (
+              change.action === "reference_video_ready" &&
+              typeof change.episode === "number"
+            ) {
+              referenceVideoEpisodes.add(change.episode);
+            }
+          }
+          for (const episode of referenceVideoEpisodes) {
+            void useReferenceVideoStore.getState().loadUnits(projectName, episode);
+          }
+
           const groupedChanges = sortGroupedChanges(
             groupChangesByType(payload.changes),
           );
@@ -309,7 +334,10 @@ export function useProjectEventsSSE(projectName?: string | null): void {
 
           // Refresh cost data when generation completes
           const hasGenerationEvent = payload.changes.some(
-            (c) => c.action === "storyboard_ready" || c.action === "video_ready",
+            (c) =>
+              c.action === "storyboard_ready" ||
+              c.action === "video_ready" ||
+              c.action === "reference_video_ready",
           );
           if (hasGenerationEvent && projectName) {
             useCostStore.getState().debouncedFetch(projectName);

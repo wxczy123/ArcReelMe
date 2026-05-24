@@ -10,7 +10,7 @@ ArcReel 把"做什么内容"和"怎么生成视频"拆成两条独立维度。`c
 | `storyboard` | `drama` | `scenes[]` | normalize-drama-script | DramaEpisodeScript | 每场景一张分镜图作起始帧 |
 | `grid` | `narration` | `segments[]` + 宫格分组 | split-narration-segments | NarrationEpisodeScript | 宫格图切块 |
 | `grid` | `drama` | `scenes[]` + 宫格分组 | normalize-drama-script | DramaEpisodeScript | 宫格图切块 |
-| `reference_video` | `narration` / `drama` | `video_units[]` | split-reference-video-units | ReferenceVideoScript | 角色 / 场景 / 道具 sheet 图直接作为 `reference_images` |
+| `reference_video` | `narration` / `drama` | `video_units[]` | adapt-reference-video-episode → split-reference-video-units | ReferenceVideoScript | 角色 / 场景 / 道具 sheet 图直接作为 `reference_images` |
 
 > `effective_mode(project, episode) = episode.generation_mode or project.generation_mode or "storyboard"`。缺省回退到图生视频（storyboard）。
 
@@ -18,7 +18,10 @@ ArcReel 把"做什么内容"和"怎么生成视频"拆成两条独立维度。`c
 
 ```
 Step 3 预处理（按 effective_mode(project, episode) 分派）
-  generation_mode = reference_video       → dispatch split-reference-video-units
+  generation_mode = reference_video       → dispatch adapt-reference-video-episode
+                                            生成 step0_episode_adaptation.md
+                                          → dispatch split-reference-video-units
+                                            生成 step1_reference_units.md
   generation_mode ∈ {storyboard, grid}：
     content_mode = narration               → dispatch split-narration-segments
     content_mode = drama                   → dispatch normalize-drama-script

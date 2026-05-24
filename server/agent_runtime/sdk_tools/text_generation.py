@@ -79,7 +79,10 @@ def _resolve_step1_path(project_path: Path, episode: int, project_data: dict[str
     generation_mode = effective_mode(project=project_data, episode=episode_dict)
     drafts_path = project_path / "drafts" / f"episode_{episode}"
     if generation_mode == "reference_video":
-        return drafts_path / "step1_reference_units.md", "split-reference-video-units subagent (Step 1)"
+        return (
+            drafts_path / "step1_reference_units.md",
+            "adapt-reference-video-episode subagent (Step 0) 和 split-reference-video-units subagent (Step 1)",
+        )
     if content_mode == "drama":
         return drafts_path / "step1_normalized_script.md", "normalize_drama_script tool"
     return drafts_path / "step1_segments.md", "片段拆分 (Step 1)"

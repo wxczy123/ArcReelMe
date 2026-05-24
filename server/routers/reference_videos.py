@@ -5,12 +5,14 @@ Mount prefix: /api/v1/projects/{project_name}/reference-videos
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 
 from lib.app_data_dir import app_data_dir
@@ -18,8 +20,11 @@ from lib.asset_types import BUCKET_KEY
 from lib.character_assets import DEFAULT_FORM_ID, ensure_character_forms, validate_form_id
 from lib.generation_queue import get_generation_queue
 from lib.i18n import Translator
+from lib.project_change_hints import emit_project_change_batch
 from lib.project_manager import EpisodeScriptReboundError, ProjectManager, effective_mode
 from lib.reference_video import parse_prompt
+from lib.thumbnail import extract_video_thumbnail
+from lib.version_manager import VersionManager
 from server.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
@@ -197,12 +202,83 @@ def _build_unit_dict(
     }
 
 
+def _unit_asset_fingerprints(project_path: Path, unit_id: str) -> dict[str, int]:
+    paths = {
+        f"reference_videos/{unit_id}.mp4": project_path / "reference_videos" / f"{unit_id}.mp4",
+        f"reference_videos/thumbnails/{unit_id}.jpg": project_path / "reference_videos" / "thumbnails" / f"{unit_id}.jpg",
+    }
+    return {rel: path.stat().st_mtime_ns for rel, path in paths.items() if path.exists()}
+
+
+def _backfill_existing_unit_videos(project_path: Path, script: dict) -> bool:
+    """用磁盘上的已生成视频补齐旧剧本里缺失的 generated_assets。
+
+    这覆盖一种实际脏数据：任务第二次已经生成了 reference_videos/E1Uxx.mp4，
+    但旧 failed 队列状态或历史写回问题导致 JSON 里仍没有 video_clip。
+    """
+    changed = False
+    for unit in script.get("video_units") or []:
+        if not isinstance(unit, dict):
+            continue
+        unit_id = str(unit.get("unit_id") or "").strip()
+        if not unit_id:
+            continue
+
+        video_rel = f"reference_videos/{unit_id}.mp4"
+        video_path = project_path / "reference_videos" / f"{unit_id}.mp4"
+        if not video_path.exists():
+            continue
+
+        assets = unit.get("generated_assets")
+        if not isinstance(assets, dict):
+            assets = {}
+            unit["generated_assets"] = assets
+            changed = True
+
+        if assets.get("video_clip") != video_rel:
+            assets["video_clip"] = video_rel
+            changed = True
+        if assets.get("status") != "completed":
+            assets["status"] = "completed"
+            changed = True
+
+        thumb_rel = f"reference_videos/thumbnails/{unit_id}.jpg"
+        thumb_path = project_path / "reference_videos" / "thumbnails" / f"{unit_id}.jpg"
+        if thumb_path.exists() and assets.get("video_thumbnail") != thumb_rel:
+            assets["video_thumbnail"] = thumb_rel
+            changed = True
+
+    return changed
+
+
+def _emit_unit_video_ready(project_name: str, episode: int, unit_id: str, fingerprints: dict[str, int]) -> None:
+    change = {
+        "entity_type": "reference_video_unit",
+        "action": "reference_video_ready",
+        "entity_id": unit_id,
+        "label": f"参考视频「{unit_id}」",
+        "focus": None,
+        "important": True,
+        "episode": episode,
+        "asset_fingerprints": fingerprints,
+    }
+    try:
+        emit_project_change_batch(project_name, [change], source="webui")
+    except Exception:
+        logger.warning("发送参考视频上传事件失败 project=%s episode=%s unit=%s", project_name, episode, unit_id, exc_info=True)
+
+
 # ============ 端点：列出 + 新建 ============
 
 
 @router.get("/episodes/{episode}/units")
 async def list_units(project_name: str, episode: int, _user: CurrentUser, _t: Translator) -> dict[str, Any]:
     _project, script, _sf = _load_episode_script(project_name, episode, _t)
+    project_path = get_project_manager().get_project_path(project_name)
+    if _backfill_existing_unit_videos(project_path, script):
+        with _locked_episode_script(project_name, _episode_script_resolver(episode, _t), _t) as fresh_script:
+            _backfill_existing_unit_videos(project_path, fresh_script)
+            script = fresh_script
     return {"units": script.get("video_units") or []}
 
 
@@ -362,3 +438,87 @@ async def generate_unit(
         user_id=_user.id,
     )
     return {"task_id": result["task_id"], "deduped": result.get("deduped", False)}
+
+
+@router.post("/episodes/{episode}/units/{unit_id}/upload")
+async def upload_unit_video(
+    project_name: str,
+    episode: int,
+    unit_id: str,
+    _user: CurrentUser,
+    _t: Translator,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail=_t("missing_filename"))
+    ext = Path(file.filename).suffix.lower()
+    if ext != ".mp4":
+        raise HTTPException(status_code=400, detail=_t("unsupported_video_type", ext=ext, allowed=".mp4"))
+
+    _project, _script, _script_file = _load_episode_script(project_name, episode, _t)
+    _find_unit(_script, unit_id, _t)
+
+    try:
+        content = await file.read()
+
+        def _store_video() -> tuple[Path, Path, int]:
+            project_path = get_project_manager().get_project_path(project_name)
+            video_dir = project_path / "reference_videos"
+            thumb_dir = video_dir / "thumbnails"
+            video_dir.mkdir(parents=True, exist_ok=True)
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path = video_dir / f"{unit_id}.mp4"
+            versions = VersionManager(project_path)
+            if output_path.exists():
+                versions.ensure_current_tracked(
+                    "reference_videos",
+                    unit_id,
+                    output_path,
+                    "手动上传前版本",
+                    source="manual_upload_existing",
+                )
+            output_path.write_bytes(content)
+            version = versions.add_version(
+                "reference_videos",
+                unit_id,
+                "手动上传视频",
+                source_file=output_path,
+                source="manual_upload",
+                original_filename=file.filename,
+            )
+            return project_path, output_path, version
+
+        project_path, output_path, version = await asyncio.to_thread(_store_video)
+
+        thumb_path = project_path / "reference_videos" / "thumbnails" / f"{unit_id}.jpg"
+        thumb_rel: str | None = None
+        if await extract_video_thumbnail(output_path, thumb_path):
+            thumb_rel = f"reference_videos/thumbnails/{unit_id}.jpg"
+        else:
+            thumb_path.unlink(missing_ok=True)
+
+        def _update_script() -> dict[str, Any]:
+            with _locked_episode_script(project_name, _episode_script_resolver(episode, _t), _t) as script:
+                unit = _find_unit(script, unit_id, _t)
+                ga = unit.setdefault("generated_assets", {})
+                ga["video_clip"] = f"reference_videos/{unit_id}.mp4"
+                ga.pop("video_uri", None)
+                if thumb_rel:
+                    ga["video_thumbnail"] = thumb_rel
+                else:
+                    ga.pop("video_thumbnail", None)
+                ga["status"] = "completed"
+                return unit
+
+        updated_unit = await asyncio.to_thread(_update_script)
+        result = {
+            "unit": updated_unit,
+            "file_path": f"reference_videos/{unit_id}.mp4",
+            "version": version,
+            "asset_fingerprints": _unit_asset_fingerprints(project_path, unit_id),
+        }
+        _emit_unit_video_ready(project_name, episode, unit_id, result.get("asset_fingerprints") or {})
+        return result
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_t("project_not_found", name=project_name)) from exc
