@@ -71,7 +71,7 @@ def build_reference_video_prompt(
         supported_durations: 当前视频模型支持的单镜头时长列表（秒）。
         max_refs: 当前视频模型支持的最大参考图数。
         max_duration: 当前视频模型的单次生成时长上限（秒）。传入时 prompt 会显式
-            引导 LLM 让 unit 总时长贴近该值，避免默认挑最短值；为 None 时不插入该段。
+            声明硬上限；unit 实际时长应继承 step1，不在本阶段重新扩写或压缩。
     """
     character_names = list(characters.keys())
     scene_names = list(scenes.keys())
@@ -79,8 +79,8 @@ def build_reference_video_prompt(
 
     durations_desc = "/".join(str(d) for d in supported_durations) + "s"
     max_duration_line = (
-        f"\n   - unit 内所有 Shot `duration` 之和宜贴近 {max_duration} 秒（当前模型上限），"
-        f"除非内容明显不需要这么长；不要默认挑最短值，也不得超过 {max_duration}。"
+        f"\n   - unit 内所有 Shot `duration` 之和不得超过 {max_duration} 秒（当前模型上限）。"
+        f"本阶段只结构化 step1 已给出的时长，不为了贴近上限而增删 shot 或改写文本。"
         if max_duration is not None
         else ""
     )
@@ -89,6 +89,7 @@ def build_reference_video_prompt(
 
 你是一位资深的短视频分镜编剧，本任务是为「参考生视频」模式产出 JSON 剧本。
 你的任务：基于下方 step1_units 表，按 schema 产出 ReferenceVideoScript。
+这是结构化转换任务，不是二次创作任务。
 
 **输出语言**：所有字符串值必须使用 {target_language}；JSON 键名 / 枚举值保持英文。
 **结构约束**：字段 / 枚举 / 必填项由 response_schema 强制；本提示只解释**如何写好每个字段**。
@@ -136,12 +137,12 @@ def build_reference_video_prompt(
 
 a. **unit_id**：保留 step1 中的 `E{episode}U{{序号}}`（当前为第 {episode} 集），不要改格式。
 
-b. **shots**：1-4 个 Shot。
+b. **shots**：1-5 个 Shot。
    - `duration`：整数秒，取值必须在当前模型支持列表中：{durations_desc}。{max_duration_line}
-   - `text`：镜头描述，聚焦此刻可见画面（语言遵循上方"输出语言"约束）。仅用 `@名称` 引用角色 / 场景 / 道具——**不要**写外貌、服装、场景细节（这些由参考图提供视觉一致性）。
-     好例：「@角色A 立于 @场景A 前，左手紧握 @道具A，目光投向远处」。
-     反例：「身穿某色服装的角色A 站在某色场景A 前，手里紧握着某色道具A」（外貌 / 服装 / 颜色应由参考图承担）。
-     动词应描述物理可观察动作（伸手 / 转身 / 摩挲 / 投向 / 收紧），避免「陷入 / 回忆 / 意识到 / 决定」等内心动词。
+   - `text`：必须继承 step1_units 中“完整 shot 文本”的原文。不要摘要、压缩、润色、删短或重写镜头描述。
+     保留镜头语言、动作细节、可见表情、对白、画外旁白、内心OS、系统面板文字、声音提示。
+     只允许做最小格式清理：去掉 Markdown 列表符号、修正明显多余空白、确保 JSON 字符串合法。
+     如果 step1 原文里有外貌 / 服装 / 场景细节，本阶段不要自行删除；需要内容修改应回到 step1 重做。
    - 单 unit 内所有 Shot `duration` 之和即该 unit `duration_seconds`。
 
 c. **references**：按顺序决定 `[图N]` 编号。
@@ -165,9 +166,9 @@ d. **duration_seconds**：所有 shot `duration` 之和；不要手动覆盖。
 
 # 复核
 
-- 每 unit 最多 4 个 shot；shot 时长之和贴近 step1 预估。
+- 每 unit 最多 5 个 shot；shot 数、shot 顺序、shot 时长、shot text 应与 step1_units 的“完整 shot 文本”一致。
 - `@名称` 只能引用 characters / scenes / props 三表中已注册的名字；character reference 的 form_id 只能来自该角色 forms。
-- 不要在 shot `text` 中描写外貌、服装、场景细节。
+- 不要把 step1 的完整 shot 文本改写成摘要句；不要删除旁白、OS、对白或系统文字。
 - 不要发明新资产。
 
 请按 step1_units 顺序逐 unit 产出。

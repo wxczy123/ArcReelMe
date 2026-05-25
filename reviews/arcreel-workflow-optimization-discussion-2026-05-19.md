@@ -643,3 +643,16 @@ frontend/src/types/reference-video.ts
 - 现在前端优先以 `generated_assets.video_clip` 判定 ready，不再被旧 failed 队列行覆盖。
 - SSE 收到 `reference_video_ready` 后会主动重拉对应 episode 的 `video_units`，避免只刷新项目详情而参考视频 store 仍停留在旧状态。
 - 列表接口增加读时自愈：如果磁盘上已经存在 `reference_videos/{unit_id}.mp4`，但剧本 JSON 还没写 `generated_assets.video_clip`，会补齐 `video_clip`、`video_thumbnail` 和 `status=completed`，避免“文件已生成但前端仍显示失败”的脏数据残留。
+
+## 2026-05-24 参考生视频阶段 3/4 剧本质量修正
+
+针对测试中出现的“3B 每个 unit 都填满 15 秒、阶段 4 把完整 shot 文本摘要化”的问题，本次调整 reference_video 模式的阶段 3A、3B、4 边界：
+
+- 阶段 3A `adapt-reference-video-episode` 不再输出 unit 秒数建议或“Unit 节奏说明”；只负责剧情功能、可见事件、外化方式、references 建议和资产缺口。
+- 阶段 3A 增加内心独白 / 旁白判断规则：交代身份、前因后果、系统认知、设定规则、目标变化的信息型独白应保留或转成短旁白 / 内心 OS / 系统字幕；重复情绪和文学化抒情才压缩。
+- 阶段 3B `split-reference-video-units` 将 `max_duration` 改为硬上限，不再当作贴近目标；unit 总时长应落在 `ceil(max_duration * 2 / 3)` 到 `max_duration` 之间。
+- 阶段 3B 每个 unit 允许 1-5 个 shot；不为了凑满时长或凑满 shot 数拆低信息镜头。
+- 阶段 3B 允许在 shot 文本中用 `画外旁白：“……”` 和 `内心OS：“……”` 承载关键信息，但要求短而有信息量。
+- 阶段 4 `build_reference_video_prompt` 明确为结构化转换任务：`shots[].text` 必须继承 `step1_reference_units.md` 的完整 shot 文本，不摘要、不压缩、不删对白 / 旁白 / OS / 系统文字；内容修改应回到阶段 3B。
+
+本次同时把 `projects/11-e3bb5320/.claude/agents/` 下的两份 agent 文档同步为新规则，方便该测试项目直接重跑阶段 3/4。
