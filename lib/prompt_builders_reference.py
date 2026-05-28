@@ -135,14 +135,14 @@ def build_reference_video_prompt(
 
 对每个 video_unit，按下列要求填写字段：
 
-a. **unit_id**：保留 step1 中的 `E{episode}U{{序号}}`（当前为第 {episode} 集），不要改格式。
+a. **unit_id**：保留 step1 中的 `E{episode}U{{两位序号}}`（当前为第 {episode} 集），例如 `E{episode}U01`，不要改成 `E{episode}U1`。
 
 b. **shots**：1-5 个 Shot。
    - `duration`：整数秒，取值必须在当前模型支持列表中：{durations_desc}。{max_duration_line}
    - `text`：必须继承 step1_units 中“完整 shot 文本”的原文。不要摘要、压缩、润色、删短或重写镜头描述。
-     保留镜头语言、动作细节、可见表情、对白、画外旁白、内心OS、系统面板文字、声音提示。
+     保留镜头语言、动作细节、可见表情、对白、自述、有明确来源的画外音、内心OS、系统面板文字、声音提示。
      只允许做最小格式清理：去掉 Markdown 列表符号、修正明显多余空白、确保 JSON 字符串合法。
-     如果 step1 原文里有外貌 / 服装 / 场景细节，本阶段不要自行删除；需要内容修改应回到 step1 重做。
+     如果 step1 原文里有旁白、外貌 / 服装 / 场景细节，本阶段不要自行删除或改写；需要内容修改应回到 step1 重做。
    - 单 unit 内所有 Shot `duration` 之和即该 unit `duration_seconds`。
 
 c. **references**：按顺序决定 `[图N]` 编号。
@@ -168,7 +168,7 @@ d. **duration_seconds**：所有 shot `duration` 之和；不要手动覆盖。
 
 - 每 unit 最多 5 个 shot；shot 数、shot 顺序、shot 时长、shot text 应与 step1_units 的“完整 shot 文本”一致。
 - `@名称` 只能引用 characters / scenes / props 三表中已注册的名字；character reference 的 form_id 只能来自该角色 forms。
-- 不要把 step1 的完整 shot 文本改写成摘要句；不要删除旁白、OS、对白或系统文字。
+- 不要把 step1 的完整 shot 文本改写成摘要句；不要删除对白、自述、有明确来源的画外音、OS、系统文字或声音提示。
 - 不要发明新资产。
 
 请按 step1_units 顺序逐 unit 产出。

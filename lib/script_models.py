@@ -217,8 +217,8 @@ class ReferenceResource(BaseModel):
 class ReferenceVideoUnit(BaseModel):
     """参考视频单元——一个视频文件的最小生成粒度。"""
 
-    unit_id: str = Field(description="格式 E{集}U{序号}")
-    shots: list[Shot] = Field(min_length=1, max_length=4, description="1-4 个 shot")
+    unit_id: str = Field(description="格式 E{集}U{两位序号}，例如 E1U01")
+    shots: list[Shot] = Field(min_length=1, max_length=5, description="1-5 个 shot")
     references: list[ReferenceResource] = Field(
         default_factory=list,
         description="按顺序决定 [图N] 编号",

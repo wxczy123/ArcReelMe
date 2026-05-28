@@ -649,10 +649,12 @@ frontend/src/types/reference-video.ts
 针对测试中出现的“3B 每个 unit 都填满 15 秒、阶段 4 把完整 shot 文本摘要化”的问题，本次调整 reference_video 模式的阶段 3A、3B、4 边界：
 
 - 阶段 3A `adapt-reference-video-episode` 不再输出 unit 秒数建议或“Unit 节奏说明”；只负责剧情功能、可见事件、外化方式、references 建议和资产缺口。
+- 阶段 3A 进一步收窄职责：Unit 规划只是剧情蓝图，不写机位、景别、运镜、构图、精确秒数、微表情、服装外貌或场景装饰，避免把中间规划写成半成品分镜。
 - 阶段 3A 增加内心独白 / 旁白判断规则：交代身份、前因后果、系统认知、设定规则、目标变化的信息型独白应保留或转成短旁白 / 内心 OS / 系统字幕；重复情绪和文学化抒情才压缩。
-- 阶段 3B `split-reference-video-units` 将 `max_duration` 改为硬上限，不再当作贴近目标；unit 总时长应落在 `ceil(max_duration * 2 / 3)` 到 `max_duration` 之间。
+- 阶段 3B `split-reference-video-units` 将 `max_duration` 改为硬上限，不再设置 `ceil(max_duration * 2 / 3)` 这类硬性下限；每个 unit 选择能讲清剧情的最短合理时长，不为 10 秒 / 15 秒扩写。
 - 阶段 3B 每个 unit 允许 1-5 个 shot；不为了凑满时长或凑满 shot 数拆低信息镜头。
-- 阶段 3B 允许在 shot 文本中用 `画外旁白：“……”` 和 `内心OS：“……”` 承载关键信息，但要求短而有信息量。
+- 阶段 3B 允许在 shot 文本中用 `画外旁白：“……”` 和 `内心OS：“……”` 承载关键信息，但要求短而有信息量；画外旁白用于给观众补叙事信息，内心 OS 用于角色心声或对系统的指令，系统反馈用 `系统音：“……”` 或系统面板文字，不再把角色指令误写成画外旁白。
+- 系统面板、HUD、字幕、数据流、灵气光效、声音提示等非实体元素默认作为画面特效或文字信息处理，不进 references；即使项目里误作为 character 注册，也不按角色参考图使用。
 - 阶段 4 `build_reference_video_prompt` 明确为结构化转换任务：`shots[].text` 必须继承 `step1_reference_units.md` 的完整 shot 文本，不摘要、不压缩、不删对白 / 旁白 / OS / 系统文字；内容修改应回到阶段 3B。
 
 本次同时把 `projects/11-e3bb5320/.claude/agents/` 下的两份 agent 文档同步为新规则，方便该测试项目直接重跑阶段 3/4。
