@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import os
 import re
@@ -34,6 +35,11 @@ XYQ_VIDEO_MODEL_SEEDANCE_2_FAST = "seedance-2.0-fast"
 
 _PROFILE_LOCK = asyncio.Lock()
 _IMAGE_SINGLE_HINT = "只生成一张图。"
+_VIDEO_NEGATIVE_TAIL = "禁止出现：背景音乐、血迹、文字字幕、水印。"
+_LEGACY_VIDEO_NEGATIVE_TAILS = (
+    "禁止出现：BGM、文字字幕、水印。",
+    "禁止出现：血迹、文字字幕、水印。",
+)
 _MIN_ACCEPTABLE_IMAGE_LONG_EDGE = 700
 _DOWNLOAD_TRIGGER_TIMEOUT_MS = 60_000
 _IMAGE_DOWNLOAD_STABILIZE_MS = 5_000
@@ -43,7 +49,7 @@ _VIDEO_HISTORY_SETTLE_MS = 1_500
 _HOME_URL = "https://xyq.jianying.com/home?from_page=xiaoyunque_landing_page&tab_name=home"
 _XYQ_VIDEO_MODEL_MENU_PATTERNS: dict[str, str | re.Pattern[str]] = {
     XYQ_VIDEO_MODEL_SEEDANCE_2: re.compile(r"^Seedance 2\.0(?! Fast)"),
-    XYQ_VIDEO_MODEL_SEEDANCE_2_FAST: "Seedance 2.0 Fast更快更便宜，经典基础版本，音视文图均可参考",
+    XYQ_VIDEO_MODEL_SEEDANCE_2_FAST: re.compile(r"^Seedance 2\.0 Fast.*(高性价比|更快更便宜)"),
 }
 _PREVIEW_CONTAINER_SELECTOR = (
     "[role=dialog], "
@@ -66,6 +72,7 @@ class _PreparedReference:
     source_path: Path
     staged_path: Path
     display_name: str
+    label: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +114,15 @@ def _image_prompt(prompt: str) -> str:
     text = (prompt or "").strip()
     if _IMAGE_SINGLE_HINT not in text:
         text = f"{text}\n{_IMAGE_SINGLE_HINT}" if text else _IMAGE_SINGLE_HINT
+    return text
+
+
+def _video_prompt(prompt: str) -> str:
+    text = (prompt or "").replace("@", "").strip()
+    for tail in _LEGACY_VIDEO_NEGATIVE_TAILS:
+        text = text.replace(tail, "").strip()
+    if _VIDEO_NEGATIVE_TAIL not in text:
+        text = f"{text.rstrip()}\n\n{_VIDEO_NEGATIVE_TAIL}" if text else _VIDEO_NEGATIVE_TAIL
     return text
 
 
@@ -158,6 +174,7 @@ def _prepare_references(
                 source_path=source,
                 staged_path=staged,
                 display_name=_display_name_from_stage(staged),
+                label=(ref.label or f"图片{idx}").strip() or f"图片{idx}",
             )
         )
     return prepared
@@ -431,6 +448,7 @@ class XyqWebRunner:
             await self._select_video_model(page)
             await self._select_aspect_ratio(page, aspect_ratio)
             await self._select_duration(page, duration_seconds)
+            prompt_text = _video_prompt(prompt)
 
             with tempfile.TemporaryDirectory(prefix="arcreel-xyq-video-") as tmp_dir:
                 video_refs = list(references)
@@ -444,9 +462,9 @@ class XyqWebRunner:
                     mode = "首尾帧" if start_image is not None and end_image is not None else "全能参考"
                     await self._select_video_reference_mode(page, mode)
                     await self._upload_references(page, prepared)
-                    await self._fill_prompt_with_refs(page, prompt, prepared)
+                    await self._fill_prompt_with_refs(page, prompt_text, prepared)
                 else:
-                    await self._fill_prompt(page, prompt)
+                    await self._fill_prompt(page, prompt_text)
 
                 submitted_at = datetime.now()
                 await self._click_create(page)
@@ -580,7 +598,7 @@ class XyqWebRunner:
         if self.model != XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC:
             logger.info("小云雀图片 model=%s 暂按 Seedream 4.0 美感版选择", self.model)
         await self._open_model_dropdown(page)
-        await page.locator("div").filter(has_text="Seedream 4.0 美感版").nth(5).click(timeout=20_000)
+        await self._click_model_option(page, "Seedream 4.0 美感版")
 
     async def _select_video_model(self, page) -> None:
         pattern = _XYQ_VIDEO_MODEL_MENU_PATTERNS.get(self.model)
@@ -588,7 +606,22 @@ class XyqWebRunner:
             logger.warning("小云雀视频 model=%s 暂不支持页面选择，回退到 Seedance 2.0", self.model)
             pattern = _XYQ_VIDEO_MODEL_MENU_PATTERNS[XYQ_VIDEO_MODEL_SEEDANCE_2]
         await self._open_model_dropdown(page)
-        await page.locator("div").filter(has_text=pattern).nth(5).click(timeout=20_000)
+        await self._click_model_option(page, pattern)
+
+    async def _click_model_option(self, page, pattern: str | re.Pattern[str]) -> None:
+        candidates = [
+            page.get_by_text(pattern).last,
+            page.locator("div").filter(has_text=pattern).last,
+            page.locator("[role=option], [role=menuitem], button, div").filter(has_text=pattern).last,
+        ]
+        errors: list[str] = []
+        for locator in candidates:
+            try:
+                await locator.click(timeout=8_000)
+                return
+            except Exception as exc:
+                errors.append(str(exc).splitlines()[0])
+        raise RuntimeError(f"小云雀未能选择模型 {pattern!r}: {'; '.join(errors[-3:])}")
 
     async def _open_model_dropdown(self, page) -> None:
         try:
@@ -624,15 +657,36 @@ class XyqWebRunner:
         except Exception:
             pass
         try:
-            await page.get_by_role("button", name="秒").click(timeout=8_000)
-            spin = page.get_by_role("spinbutton", name="秒")
-            await spin.fill(str(duration), timeout=8_000)
+            await self._open_duration_editor(page)
+            await self._fill_duration_spinbutton(page, duration)
         except Exception:
             logger.warning("小云雀未能设置视频时长 %s 秒，继续使用页面当前时长", duration)
         try:
             await page.get_by_role("button", name="向左滚动配置项").click(timeout=3_000)
         except Exception:
             pass
+
+    async def _open_duration_editor(self, page) -> None:
+        candidates = (
+            page.get_by_role("button", name=re.compile(r"^\d+\s*秒$")),
+            page.locator("button").filter(has_text=re.compile(r"^\s*\d+\s*秒\s*$")),
+            page.get_by_text(re.compile(r"^\d+\s*秒$")),
+        )
+        for locator in candidates:
+            try:
+                await locator.first.click(timeout=3_000)
+                return
+            except Exception:
+                continue
+        raise RuntimeError("小云雀未找到视频时长编辑入口")
+
+    async def _fill_duration_spinbutton(self, page, duration: int) -> None:
+        spin = page.get_by_role("spinbutton", name="秒")
+        await spin.wait_for(timeout=8_000)
+        await spin.click(timeout=8_000)
+        with contextlib.suppress(Exception):
+            await spin.press("Control+A", timeout=1_000)
+        await spin.fill(str(duration), timeout=8_000)
 
     async def _select_video_reference_mode(self, page, mode: Literal["全能参考", "首尾帧"]) -> None:
         names = ("全能参考", "首尾帧")
@@ -802,15 +856,28 @@ class XyqWebRunner:
         text = (prompt or "").strip()
         editor = page.locator(".tiptap")
         await editor.click(timeout=20_000)
-        await editor.fill(text, timeout=20_000)
+        await editor.fill("", timeout=20_000)
         for idx, ref in enumerate(references, start=1):
             await self._open_reference_mention_menu(page)
             await self._select_uploaded_reference(page, ref, ordinal=idx)
+            punctuation = "。" if idx == len(references) else "，"
+            await page.keyboard.insert_text(f"是{ref.label}{punctuation}")
+        if text:
+            await page.keyboard.insert_text(f"\n\n{text}")
 
     async def _open_reference_mention_menu(self, page) -> None:
         await page.locator(".tiptap").click(timeout=20_000)
         await page.keyboard.press("End")
-        await page.keyboard.insert_text("\n@")
+        try:
+            await page.get_by_role("button", name="@引用角色与素材").click(timeout=5_000)
+            await page.get_by_role("button", name=re.compile(r"\.(png|jpg|jpeg|webp)", re.I)).first.wait_for(
+                timeout=8_000
+            )
+            return
+        except Exception:
+            pass
+
+        await page.keyboard.insert_text("@")
         try:
             await page.get_by_role("button", name=re.compile(r"\.(png|jpg|jpeg|webp)", re.I)).first.wait_for(
                 timeout=5_000

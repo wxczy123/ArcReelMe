@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from lib.db import async_session_factory
 from lib.db.base import DEFAULT_USER_ID
 from lib.image_utils import compress_image_bytes
 from lib.prompt_builders import append_video_negative_tail
+from lib.providers import PROVIDER_XYQ_WEB
 from lib.reference_video import render_prompt_for_backend
 from lib.reference_video.errors import MissingReferenceError, RequestPayloadTooLargeError
 from lib.script_models import ReferenceResource
@@ -28,6 +30,8 @@ from lib.thumbnail import extract_video_thumbnail
 from server.services.generation_tasks import get_media_generator, get_project_manager
 
 logger = logging.getLogger(__name__)
+
+_XYQ_VIDEO_NEGATIVE_TAIL = "禁止出现：背景音乐、血迹、文字字幕、水印。"
 
 
 def _resolve_unit_references(
@@ -121,6 +125,45 @@ def _render_unit_prompt(unit: dict) -> str:
     if not rendered.strip():
         raise ValueError("reference video unit prompt is empty: all shots[*].text are blank")
     return append_video_negative_tail(rendered)
+
+
+def _strip_at_symbols(text: str) -> str:
+    return text.replace("@", "")
+
+
+def _shot_line_with_header(index: int, shot: dict) -> str:
+    text = _strip_at_symbols(str(shot.get("text", "") or "")).strip()
+    if re.match(r"^Shot\s+\d+\s*\(\d+s\):", text, re.I):
+        return text
+    duration = int(shot.get("duration") or 0)
+    return f"Shot {index} ({duration}s): {text}"
+
+
+def _append_xyq_video_negative_tail(prompt: str) -> str:
+    text = (prompt or "").strip()
+    if not text:
+        return _XYQ_VIDEO_NEGATIVE_TAIL
+    if _XYQ_VIDEO_NEGATIVE_TAIL in text:
+        return text
+    return f"{text.rstrip()}\n\n{_XYQ_VIDEO_NEGATIVE_TAIL}"
+
+
+def _render_xyq_unit_prompt(unit: dict) -> str:
+    """小云雀使用网页 @ 图片 chip，prompt 本文只保留完整 shot 文本并删除 @ 符号。"""
+    shots = unit.get("shots") or []
+    lines = [_shot_line_with_header(idx, s) for idx, s in enumerate(shots, start=1)]
+    rendered = "\n\n".join(line for line in lines if line.strip())
+    if not rendered.strip():
+        raise ValueError("reference video unit prompt is empty: all shots[*].text are blank")
+    return _append_xyq_video_negative_tail(rendered)
+
+
+def _reference_image_labels(unit: dict) -> list[str]:
+    labels: list[str] = []
+    for ref in unit.get("references") or []:
+        parsed = ReferenceResource.model_validate(ref)
+        labels.append(parsed.name)
+    return labels
 
 
 def _apply_provider_constraints(
@@ -263,14 +306,17 @@ async def execute_reference_video_task(
     if resolution is None:
         resolution = get_provider_fallback(provider_name)
 
-    # 6. 渲染 prompt（@→[图N]）。必须按 `constrained_refs` 的长度裁 `unit.references`
-    #    再渲染，保证 [图N] 的 1-based 索引与 backend 实际收到的 reference_images
-    #    长度严格对齐；否则裁剪后的 `@clipped_name` 会被替成 `[图N]` 指向不存在的图。
+    # 6. 渲染 prompt。非小云雀 backend 使用 @→[图N]；小云雀网页实际通过 @ 按钮绑定图片，
+    #    prompt 本文保留完整 Shot N (Xs) 文本并删除 @ 符号。
+    #    必须按 `constrained_refs` 的长度裁 `unit.references` 再渲染，保证 prompt 与
+    #    backend 实际收到的 reference_images 长度严格对齐。
     unit_for_prompt = unit
     unit_refs = unit.get("references") or []
     if len(constrained_refs) < len(unit_refs):
         unit_for_prompt = {**unit, "references": unit_refs[: len(constrained_refs)]}
-    rendered_prompt = _render_unit_prompt(unit_for_prompt)
+    is_xyq_web = provider_name == PROVIDER_XYQ_WEB or registry_provider_id == PROVIDER_XYQ_WEB
+    rendered_prompt = _render_xyq_unit_prompt(unit_for_prompt) if is_xyq_web else _render_unit_prompt(unit_for_prompt)
+    reference_image_labels = _reference_image_labels(unit_for_prompt) if is_xyq_web else None
 
     # 7. 压缩到临时文件（2048px/q=85）→ 首次调用
     tmp_refs: list[Path] = await asyncio.to_thread(_compress_references_to_tempfiles, constrained_refs)
@@ -284,6 +330,7 @@ async def execute_reference_video_task(
                 resource_type="reference_videos",
                 resource_id=resource_id,
                 reference_images=tmp_refs,
+                reference_image_labels=reference_image_labels,
                 aspect_ratio=project.get("aspect_ratio", "9:16"),
                 duration_seconds=effective_duration,
                 resolution=resolution,
@@ -304,6 +351,7 @@ async def execute_reference_video_task(
                 resource_type="reference_videos",
                 resource_id=resource_id,
                 reference_images=tmp_refs,
+                reference_image_labels=reference_image_labels,
                 aspect_ratio=project.get("aspect_ratio", "9:16"),
                 duration_seconds=effective_duration,
                 resolution=resolution,

@@ -306,6 +306,7 @@ class MediaGenerator:
         start_image: str | Path | Image.Image | None = None,
         end_image: Path | None = None,
         reference_images: list[Path] | None = None,
+        reference_image_labels: list[str] | None = None,
         aspect_ratio: str = "9:16",
         duration_seconds: str | int = "8",
         resolution: str | None = None,
@@ -321,6 +322,7 @@ class MediaGenerator:
             start_image: 起始帧图片（image-to-video 模式）
             end_image: 结束帧图片（first_last 模式）
             reference_images: 参考图片列表（multi-reference 模式）
+            reference_image_labels: 与 reference_images 对齐的可读标签
             aspect_ratio: 宽高比，默认 9:16（竖屏）
             duration_seconds: 视频时长，可选 "4", "6", "8"
             resolution: 分辨率，默认不传（由 backend/SDK 决定）
@@ -337,6 +339,7 @@ class MediaGenerator:
                 start_image=start_image,
                 end_image=end_image,
                 reference_images=reference_images,
+                reference_image_labels=reference_image_labels,
                 aspect_ratio=aspect_ratio,
                 duration_seconds=duration_seconds,
                 resolution=resolution,
@@ -352,6 +355,7 @@ class MediaGenerator:
         start_image: str | Path | Image.Image | None = None,
         end_image: Path | None = None,
         reference_images: list[Path] | None = None,
+        reference_image_labels: list[str] | None = None,
         aspect_ratio: str = "9:16",
         duration_seconds: str | int = "8",
         resolution: str | None = None,
@@ -367,6 +371,7 @@ class MediaGenerator:
             start_image: 起始帧图片（image-to-video 模式）
             end_image: 结束帧图片（first_last 模式）
             reference_images: 参考图片列表（multi-reference 模式）
+            reference_image_labels: 与 reference_images 对齐的可读标签
             aspect_ratio: 宽高比，默认 9:16（竖屏）
             duration_seconds: 视频时长，可选 "4", "6", "8"
             resolution: 分辨率，默认不传（由 backend/SDK 决定）
@@ -428,6 +433,7 @@ class MediaGenerator:
             # Three-level fallback based on backend video capabilities
             actual_end_image = None
             actual_reference_images = reference_images
+            actual_reference_image_labels = reference_image_labels
 
             if end_image and self._video_backend:
                 caps = self._video_backend.video_capabilities
@@ -436,6 +442,7 @@ class MediaGenerator:
                 elif caps.reference_images:
                     # Fallback: pass end_image as reference image
                     actual_reference_images = (actual_reference_images or []) + [end_image]
+                    actual_reference_image_labels = (actual_reference_image_labels or []) + ["尾帧"]
                     logger.info(
                         "Video backend %s does not support last_frame, falling back to reference_images",
                         self._video_backend.name,
@@ -455,6 +462,7 @@ class MediaGenerator:
                 start_image=Path(start_image) if isinstance(start_image, (str, Path)) else None,
                 end_image=actual_end_image,
                 reference_images=actual_reference_images,
+                reference_image_labels=actual_reference_image_labels,
                 generate_audio=effective_generate_audio,
                 project_name=self.project_name,
                 service_tier=version_metadata.get("service_tier", "default"),

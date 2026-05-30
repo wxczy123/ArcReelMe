@@ -69,7 +69,11 @@ class XyqWebVideoBackend:
         )
 
     async def generate(self, request: VideoGenerationRequest) -> VideoGenerationResult:
-        references = [XyqReference(path=Path(ref)) for ref in request.reference_images or []]
+        labels = request.reference_image_labels or []
+        references = [
+            XyqReference(path=Path(ref), label=labels[idx] if idx < len(labels) else "")
+            for idx, ref in enumerate(request.reference_images or [])
+        ]
         if len(references) > XYQ_MAX_REFERENCE_IMAGES:
             logger.warning("小云雀参考图数量 %d 超过上限 %d，截断", len(references), XYQ_MAX_REFERENCE_IMAGES)
             references = references[:XYQ_MAX_REFERENCE_IMAGES]

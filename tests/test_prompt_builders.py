@@ -69,7 +69,7 @@ class TestVideoNegativeTail:
     def test_appends_when_missing(self):
         result = append_video_negative_tail("林清缓缓抬头")
         assert "林清缓缓抬头" in result
-        assert "BGM" in result
+        assert "禁止出现：背景音乐、血迹、文字字幕、水印。" in result
 
     def test_idempotent(self):
         once = append_video_negative_tail("林清缓缓抬头")
@@ -78,7 +78,7 @@ class TestVideoNegativeTail:
 
     def test_handles_empty_input(self):
         result = append_video_negative_tail("")
-        assert "BGM" in result
+        assert "禁止出现：背景音乐、血迹、文字字幕、水印。" in result
 
     def test_handles_whitespace_only_input(self):
         # 纯空白等同空：避免拼出前导空行 + 尾词的怪异输出

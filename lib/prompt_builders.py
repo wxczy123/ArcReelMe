@@ -19,7 +19,7 @@ _CHARACTER_THREE_VIEW_LAYOUT = "三视图角色参考图，纯净浅色背景，
 _PROP_LAYOUT = "三视图水平排列于纯净浅灰背景：左侧正面全视图、中间 45° 侧视图体现立体感、右侧关键细节特写。"
 _PROP_GUARD = "外观结构完整，焦点清晰。"
 
-_NEGATIVE_TAIL_VIDEO = "禁止出现：BGM、文字字幕、水印。"
+_NEGATIVE_TAIL_VIDEO = "禁止出现：背景音乐、血迹、文字字幕、水印。"
 
 
 def _style_prefix(style: str = "", style_description: str = "") -> str:

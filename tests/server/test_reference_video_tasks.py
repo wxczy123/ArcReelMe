@@ -11,7 +11,9 @@ from lib.reference_video.errors import MissingReferenceError, RequestPayloadTooL
 from server.services.reference_video_tasks import (
     _apply_provider_constraints,
     _compress_references_to_tempfiles,
+    _reference_image_labels,
     _render_unit_prompt,
+    _render_xyq_unit_prompt,
     _resolve_unit_references,
 )
 
@@ -206,6 +208,27 @@ def test_render_unit_prompt_replaces_mentions_in_order():
     # Shot header 保留
     assert "Shot 1 (3s):" in rendered
     assert "Shot 2 (5s):" in rendered
+
+
+def test_render_xyq_unit_prompt_keeps_shot_headers_and_strips_mentions():
+    unit = {
+        "shots": [
+            {"duration": 4, "text": "广角仰拍。@张三 站在 @酒馆 门前"},
+            {"duration": 5, "text": "Shot 2 (5s): @张三 推门入内"},
+        ],
+        "references": [
+            {"type": "character", "name": "张三"},
+            {"type": "scene", "name": "酒馆"},
+        ],
+    }
+    rendered = _render_xyq_unit_prompt(unit)
+    assert "Shot 1 (4s): 广角仰拍。张三 站在 酒馆 门前" in rendered
+    assert "Shot 2 (5s): 张三 推门入内" in rendered
+    assert "@" not in rendered
+    assert "[图" not in rendered
+    assert "禁止出现：背景音乐、血迹、文字字幕、水印。" in rendered
+    assert "BGM" not in rendered
+    assert _reference_image_labels(unit) == ["张三", "酒馆"]
 
 
 def test_apply_provider_constraints_veo_clamps_duration_and_refs():

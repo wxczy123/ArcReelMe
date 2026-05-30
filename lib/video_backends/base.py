@@ -133,6 +133,7 @@ class VideoGenerationRequest:
     start_image: Path | None = None
     end_image: Path | None = None  # For first_last mode
     reference_images: list[Path] | None = None  # For multi-reference mode
+    reference_image_labels: list[str] | None = None  # Human labels aligned with reference_images
     generate_audio: bool = True
 
     # 项目上下文（用于构建文件服务 URL 等）
