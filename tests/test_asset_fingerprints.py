@@ -17,9 +17,14 @@ class TestComputeAssetFingerprints:
         vid = tmp_path / "videos" / "scene_E1S01.mp4"
         vid.write_bytes(b"vid")
 
+        (tmp_path / "reference_videos").mkdir()
+        ref_vid = tmp_path / "reference_videos" / "E1U01.mp4"
+        ref_vid.write_bytes(b"refvid")
+
         result = compute_asset_fingerprints(tmp_path)
         assert "storyboards/scene_E1S01.png" in result
         assert "videos/scene_E1S01.mp4" in result
+        assert "reference_videos/E1U01.mp4" in result
         assert isinstance(result["storyboards/scene_E1S01.png"], int)
 
     def test_includes_thumbnails_characters_scenes_props(self, tmp_path):

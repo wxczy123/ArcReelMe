@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Film, Loader2, Sparkles, RotateCcw, AlertTriangle, Upload } from "lucide-react";
 import { API } from "@/api";
+import { useProjectsStore } from "@/stores/projects-store";
 import { formatCost } from "@/utils/cost-format";
 import { StatusBadge, deriveUnitStatus } from "./unit-status";
 import type { CostBreakdown, ReferenceVideoUnit, UnitStatus } from "@/types";
@@ -42,6 +43,8 @@ export function UnitPreviewPanel({
 }: UnitPreviewPanelProps) {
   const { t } = useTranslation("dashboard");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const clip = unit?.generated_assets.video_clip ?? null;
+  const clipFingerprint = useProjectsStore((s) => (clip ? s.getAssetFingerprint(clip) : null));
 
   if (!unit) {
     return (
@@ -52,8 +55,7 @@ export function UnitPreviewPanel({
   }
 
   const effectiveStatus = status ?? deriveUnitStatus(unit);
-  const clip = unit.generated_assets.video_clip;
-  const videoUrl = clip && projectName ? API.getFileUrl(projectName, clip) : null;
+  const videoUrl = clip && projectName ? API.getFileUrl(projectName, clip, clipFingerprint) : null;
 
   // 状态先于 video_clip 落库的窗口里，effectiveStatus==="ready" 但 videoUrl
   // 还为 null —— 这种情况下走 inFlight 占位避免空白面板。
@@ -90,6 +92,7 @@ export function UnitPreviewPanel({
           <>
             {/* eslint-disable-next-line jsx-a11y/media-has-caption -- AI-generated video clips have no caption track */}
             <video
+              key={videoUrl}
               src={videoUrl}
               aria-label={t("reference_preview_video_aria", { id: unit.unit_id })}
               controls

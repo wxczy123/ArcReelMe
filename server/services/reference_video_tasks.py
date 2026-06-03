@@ -32,6 +32,7 @@ from server.services.generation_tasks import get_media_generator, get_project_ma
 logger = logging.getLogger(__name__)
 
 _XYQ_VIDEO_NEGATIVE_TAIL = "禁止出现：背景音乐、血迹、文字字幕、水印。"
+_XYQ_VIDEO_QUALITY_GUIDE = "电影级高清画质，主体清晰，动作连贯，镜头稳定。"
 
 
 def _resolve_unit_references(
@@ -141,10 +142,9 @@ def _shot_line_with_header(index: int, shot: dict) -> str:
 
 def _append_xyq_video_negative_tail(prompt: str) -> str:
     text = (prompt or "").strip()
-    if not text:
-        return _XYQ_VIDEO_NEGATIVE_TAIL
-    if _XYQ_VIDEO_NEGATIVE_TAIL in text:
-        return text
+    text = text.replace(_XYQ_VIDEO_NEGATIVE_TAIL, "").strip()
+    if _XYQ_VIDEO_QUALITY_GUIDE not in text:
+        text = f"{text.rstrip()}\n\n{_XYQ_VIDEO_QUALITY_GUIDE}" if text else _XYQ_VIDEO_QUALITY_GUIDE
     return f"{text.rstrip()}\n\n{_XYQ_VIDEO_NEGATIVE_TAIL}"
 
 

@@ -226,6 +226,7 @@ def test_render_xyq_unit_prompt_keeps_shot_headers_and_strips_mentions():
     assert "Shot 2 (5s): 张三 推门入内" in rendered
     assert "@" not in rendered
     assert "[图" not in rendered
+    assert "电影级高清画质，主体清晰，动作连贯，镜头稳定。" in rendered
     assert "禁止出现：背景音乐、血迹、文字字幕、水印。" in rendered
     assert "BGM" not in rendered
     assert _reference_image_labels(unit) == ["张三", "酒馆"]

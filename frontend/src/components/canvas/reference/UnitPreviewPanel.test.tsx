@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { UnitPreviewPanel } from "./UnitPreviewPanel";
+import { useProjectsStore } from "@/stores/projects-store";
 import type { ReferenceVideoUnit } from "@/types";
 
 function mkUnit(overrides: Partial<ReferenceVideoUnit> = {}): ReferenceVideoUnit {
@@ -37,6 +38,9 @@ describe("UnitPreviewPanel", () => {
   });
 
   it("renders <video> when video_clip is present", () => {
+    useProjectsStore.setState({
+      assetFingerprints: { "reference_videos/E1U1.mp4": 123 },
+    });
     const unit = mkUnit({
       generated_assets: {
         ...mkUnit().generated_assets,
@@ -47,7 +51,9 @@ describe("UnitPreviewPanel", () => {
     const { container } = render(
       <UnitPreviewPanel unit={unit} projectName="proj" />,
     );
-    expect(container.querySelector("video")).toBeInTheDocument();
+    const video = container.querySelector("video");
+    expect(video).toBeInTheDocument();
+    expect(video?.getAttribute("src")).toContain("?v=123");
   });
 
   it("calls onUpload when a video file is selected", async () => {

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import logging
 import os
 import re
@@ -35,6 +34,7 @@ XYQ_VIDEO_MODEL_SEEDANCE_2_FAST = "seedance-2.0-fast"
 
 _PROFILE_LOCK = asyncio.Lock()
 _IMAGE_SINGLE_HINT = "只生成一张图。"
+_VIDEO_QUALITY_GUIDE = "电影级高清画质，主体清晰，动作连贯，镜头稳定。"
 _VIDEO_NEGATIVE_TAIL = "禁止出现：背景音乐、血迹、文字字幕、水印。"
 _LEGACY_VIDEO_NEGATIVE_TAILS = (
     "禁止出现：BGM、文字字幕、水印。",
@@ -44,9 +44,14 @@ _MIN_ACCEPTABLE_IMAGE_LONG_EDGE = 700
 _DOWNLOAD_TRIGGER_TIMEOUT_MS = 60_000
 _IMAGE_DOWNLOAD_STABILIZE_MS = 5_000
 _VIDEO_POLL_INTERVAL_SECONDS = 10 * 60
+_VIDEO_SUBMISSION_CONFIRM_TIMEOUT_SECONDS = 120
 _VIDEO_SUBMISSION_MATCH_WINDOW_SECONDS = 120
 _VIDEO_HISTORY_SETTLE_MS = 1_500
 _HOME_URL = "https://xyq.jianying.com/home?from_page=xiaoyunque_landing_page&tab_name=home"
+_XYQ_VIDEO_DURATION_STORAGE_KEYS = (
+    "__pippitcn_home_videoPartDuration",
+    "__pippitcn_home_agentVideoDuration",
+)
 _XYQ_VIDEO_MODEL_MENU_PATTERNS: dict[str, str | re.Pattern[str]] = {
     XYQ_VIDEO_MODEL_SEEDANCE_2: re.compile(r"^Seedance 2\.0(?! Fast)"),
     XYQ_VIDEO_MODEL_SEEDANCE_2_FAST: re.compile(r"^Seedance 2\.0 Fast.*(高性价比|更快更便宜)"),
@@ -121,9 +126,10 @@ def _video_prompt(prompt: str) -> str:
     text = (prompt or "").replace("@", "").strip()
     for tail in _LEGACY_VIDEO_NEGATIVE_TAILS:
         text = text.replace(tail, "").strip()
-    if _VIDEO_NEGATIVE_TAIL not in text:
-        text = f"{text.rstrip()}\n\n{_VIDEO_NEGATIVE_TAIL}" if text else _VIDEO_NEGATIVE_TAIL
-    return text
+    text = text.replace(_VIDEO_NEGATIVE_TAIL, "").strip()
+    if _VIDEO_QUALITY_GUIDE not in text:
+        text = f"{text.rstrip()}\n\n{_VIDEO_QUALITY_GUIDE}" if text else _VIDEO_QUALITY_GUIDE
+    return f"{text.rstrip()}\n\n{_VIDEO_NEGATIVE_TAIL}" if text else _VIDEO_NEGATIVE_TAIL
 
 
 def _normalize_aspect_ratio(aspect_ratio: str | None) -> Literal["16:9", "9:16", "1:1"]:
@@ -444,10 +450,11 @@ class XyqWebRunner:
     ) -> _VideoSubmission:
         async with _playwright_context(self) as page:
             await self._goto_home(page)
-            await page.get_by_role("button", name="沉浸式短片").click(timeout=20_000)
-            await self._select_video_model(page)
-            await self._select_aspect_ratio(page, aspect_ratio)
-            await self._select_duration(page, duration_seconds)
+            await self._open_video_workspace(
+                page,
+                aspect_ratio=aspect_ratio,
+                duration_seconds=duration_seconds,
+            )
             prompt_text = _video_prompt(prompt)
 
             with tempfile.TemporaryDirectory(prefix="arcreel-xyq-video-") as tmp_dir:
@@ -473,8 +480,11 @@ class XyqWebRunner:
                 return _VideoSubmission(submitted_at=submitted_at, detail_text=detail_text)
 
     async def _capture_video_submission_detail_time(self, page, submitted_at: datetime) -> str:
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + _VIDEO_SUBMISSION_CONFIRM_TIMEOUT_SECONDS
+        confirmed_thread = False
         while time.monotonic() < deadline:
+            if "thread_id=" in page.url:
+                confirmed_thread = True
             try:
                 body_text = await page.locator("body").inner_text(timeout=2_000)
             except Exception:
@@ -484,9 +494,15 @@ class XyqWebRunner:
                 return matched
             await page.wait_for_timeout(1_000)
 
-        fallback = _format_xyq_detail_time(submitted_at)
-        logger.warning("小云雀未从页面确认视频提交时间，使用本地时间兜底: %s", fallback)
-        return fallback
+        if confirmed_thread:
+            fallback = _format_xyq_detail_time(submitted_at)
+            logger.warning("小云雀已进入任务详情页但未识别提交时间，使用本地时间兜底: %s", fallback)
+            return fallback
+
+        raise RuntimeError(
+            "小云雀视频任务未确认提交成功：提交后未进入任务详情页，也未出现任务提交时间；"
+            "已停止后续下载轮询，请检查页面是否有错误提示或重新提交。"
+        )
 
     async def _poll_video_download(self, submission: _VideoSubmission, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -585,6 +601,9 @@ class XyqWebRunner:
 
     async def _goto_home(self, page) -> None:
         await page.goto(_HOME_URL, wait_until="domcontentloaded", timeout=60_000)
+        await self._wait_home_ready(page)
+
+    async def _wait_home_ready(self, page) -> None:
         try:
             await page.wait_for_load_state("networkidle", timeout=5_000)
         except Exception:
@@ -593,6 +612,66 @@ class XyqWebRunner:
             await page.get_by_role("button", name=re.compile("生成图片|沉浸式短片")).first.wait_for(timeout=30_000)
         except Exception as exc:
             raise RuntimeError("小云雀未进入创作首页，可能是登录态失效。请用同一 profile 手动登录后重试。") from exc
+
+    async def _reload_home(self, page) -> None:
+        try:
+            await page.reload(wait_until="domcontentloaded", timeout=60_000)
+            await self._wait_home_ready(page)
+        except Exception:
+            await self._goto_home(page)
+
+    async def _open_video_workspace(self, page, *, aspect_ratio: str, duration_seconds: int) -> None:
+        duration = _normalize_duration(duration_seconds)
+        last_seen: int | None = None
+        for attempt in range(2):
+            await self._store_video_duration_preference(page, duration)
+            await self._reload_home(page)
+            await page.get_by_role("button", name="沉浸式短片").click(timeout=20_000)
+            await self._select_video_model(page)
+            await self._select_aspect_ratio(page, aspect_ratio)
+            last_seen = await self._read_visible_video_duration(page)
+            if last_seen == duration:
+                return
+            logger.warning(
+                "小云雀视频时长校验失败，第 %d 次尝试期望 %s 秒，页面当前 %s 秒",
+                attempt + 1,
+                duration,
+                last_seen,
+            )
+        current = f"{last_seen} 秒" if last_seen is not None else "未知"
+        raise RuntimeError(f"小云雀未能设置视频时长 {duration} 秒：页面当前时长 {current}")
+
+    async def _store_video_duration_preference(self, page, duration: int) -> None:
+        await page.evaluate(
+            """([keys, value]) => {
+                for (const key of keys) {
+                    window.localStorage.setItem(key, value);
+                }
+            }""",
+            [list(_XYQ_VIDEO_DURATION_STORAGE_KEYS), str(duration)],
+        )
+
+    async def _read_visible_video_duration(self, page) -> int | None:
+        pattern = re.compile(r"^\s*(\d+)\s*秒\s*$")
+        locators = (
+            page.locator("button.videoPartDurationTrigger-KWTics"),
+            page.get_by_role("button", name=pattern),
+            page.locator("button").filter(has_text=pattern),
+        )
+        for locator in locators:
+            try:
+                count = min(await locator.count(), 10)
+            except Exception:
+                continue
+            for index in range(count):
+                try:
+                    text = await locator.nth(index).inner_text(timeout=1_000)
+                except Exception:
+                    continue
+                match = pattern.match(text)
+                if match:
+                    return int(match.group(1))
+        return None
 
     async def _select_image_model(self, page) -> None:
         if self.model != XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC:
@@ -649,44 +728,6 @@ class XyqWebRunner:
             except Exception:
                 continue
         logger.warning("小云雀未能切换比例到 %s，继续使用页面当前比例", ratio)
-
-    async def _select_duration(self, page, duration_seconds: int) -> None:
-        duration = _normalize_duration(duration_seconds)
-        try:
-            await page.get_by_role("button", name="向右滚动配置项").click(timeout=3_000)
-        except Exception:
-            pass
-        try:
-            await self._open_duration_editor(page)
-            await self._fill_duration_spinbutton(page, duration)
-        except Exception:
-            logger.warning("小云雀未能设置视频时长 %s 秒，继续使用页面当前时长", duration)
-        try:
-            await page.get_by_role("button", name="向左滚动配置项").click(timeout=3_000)
-        except Exception:
-            pass
-
-    async def _open_duration_editor(self, page) -> None:
-        candidates = (
-            page.get_by_role("button", name=re.compile(r"^\d+\s*秒$")),
-            page.locator("button").filter(has_text=re.compile(r"^\s*\d+\s*秒\s*$")),
-            page.get_by_text(re.compile(r"^\d+\s*秒$")),
-        )
-        for locator in candidates:
-            try:
-                await locator.first.click(timeout=3_000)
-                return
-            except Exception:
-                continue
-        raise RuntimeError("小云雀未找到视频时长编辑入口")
-
-    async def _fill_duration_spinbutton(self, page, duration: int) -> None:
-        spin = page.get_by_role("spinbutton", name="秒")
-        await spin.wait_for(timeout=8_000)
-        await spin.click(timeout=8_000)
-        with contextlib.suppress(Exception):
-            await spin.press("Control+A", timeout=1_000)
-        await spin.fill(str(duration), timeout=8_000)
 
     async def _select_video_reference_mode(self, page, mode: Literal["全能参考", "首尾帧"]) -> None:
         names = ("全能参考", "首尾帧")

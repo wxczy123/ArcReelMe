@@ -59,14 +59,19 @@ def _format_duration_constraint(supported_durations: list[int], default_duration
         durations_str = ", ".join(str(d) for d in sorted_d)
         body = f"从 [{durations_str}] 秒中选择"
 
+    speech_hint = (
+        "；含对白/自述/有来源声音时，普通语速按约 4.0 中文字符/秒、争执或命令按 4.5-5.0 中文字符/秒估算，"
+        "并预留约 1 秒给动作或反应，估算值不要低于 4.0、不要高于 5.5 中文字符/秒"
+    )
+
     if default_duration is not None:
         if default_duration not in sorted_d:
             raise ValueError(
                 f"default_duration={default_duration} 不在 supported_durations={sorted_d} 内，"
                 "调用方必须保证默认值合法（否则 prompt 会自相矛盾）"
             )
-        return f"时长：{body}，默认 {default_duration} 秒"
-    return f"时长：{body}，按内容节奏自行决定"
+        return f"时长：{body}，默认 {default_duration} 秒{speech_hint}"
+    return f"时长：{body}，按内容节奏自行决定{speech_hint}"
 
 
 def _format_aspect_ratio_desc(aspect_ratio: str) -> str:
@@ -91,7 +96,7 @@ _SCENE_WRITING_GUIDE = """用一段连贯的描述说明当前画面中真实可
 
 # video_prompt.action 写作指导：动态优先 + 正反例。
 # 好例用方括号小标注隐性传达"主体动作 / 物件互动 / 环境动态"三层。
-_ACTION_WRITING_GUIDE = """用一段描述说明该时长内主体的连贯动作（肢体动作、手势、表情过渡），可包含必要的环境互动（衣摆、尘埃、推门带起的气流等）。让画面"活"起来，但不要堆叠不可能在单镜头内完成的动作或蒙太奇切换。动词应描述物理可观察动作（伸手 / 转身 / 摩挲 / 投向 / 收紧），避免内心动词。动作幅度应与该 segment 的 duration 匹配：5 秒级镜头通常完成一个连贯动作 + 一个细节互动；8 秒级可承载一次动作过渡（如「抬头—对视—开口」），不要把三组以上独立动作塞进同一 action。
+_ACTION_WRITING_GUIDE = """用一段描述说明该时长内主体的连贯动作（肢体动作、手势、表情过渡），可包含必要的环境互动（衣摆、尘埃、推门带起的气流等）。让画面"活"起来，但不要堆叠不可能在单镜头内完成的动作或蒙太奇切换。动词应描述物理可观察动作（伸手 / 转身 / 摩挲 / 投向 / 收紧），避免内心动词。每段 action 至少包含一个可执行推进点：角色说话时的可见动作、推动局面的具体动作、场景状态变化或外界后果；不要只写站立、凝视、沉默、走路、纯环境展示。动作幅度应与该 segment 的 duration 匹配：5 秒级镜头通常完成一个连贯动作 + 一个细节互动；8 秒级可承载一次动作过渡（如「抬头—对视—开口」），不要把三组以上独立动作塞进同一 action。
    好例：「[主体动作] 林清缓缓抬起头，眼角微微收紧。[物件互动] 手指无意识地摩挲信纸边缘。[环境动态] 窗外雨势渐大，桌面投下的雨痕影子在缓慢移动。」
    反例：「林清像蝴蝶般飞舞，思绪在过去与现在之间快速切换。」
    反例里这类词族也要避免：思绪飞舞 / 回忆翻涌 / 突然意识到 / 决心 / 仿佛 / 像蝴蝶般。"""
@@ -347,17 +352,26 @@ def build_normalize_prompt(
 
     durations_str = ", ".join(str(d) for d in normalized_durations)
     max_dur = normalized_durations[-1]
+    speech_duration_rule = (
+        "- 含对白、自述或有来源声音的场景，要按中文字符数估算可听时长：普通叙述约 4.0 中文字符/秒，"
+        "争执、命令、急促打断约 4.5-5.0 中文字符/秒；不要使用低于 4.0 或高于 5.5 的估算值，"
+        "并额外预留约 1 秒给动作或反应\n"
+        "- 如果台词按上述估算超过当前时长，应拆成多个连续场景承载，保留核心语义、冲突强度、规则信息和人物态度；"
+        "只压缩重复语气词、重复情绪或无新信息的铺垫，不要把长对白硬塞进短时长"
+    )
 
     if default_duration is not None:
         duration_rules = (
             f"- 时长：只能取 {durations_str} 中的值（该视频模型支持的秒数集合）\n"
             f"- 每场景默认 {default_duration} 秒；打斗、大场面、情绪铺陈等画面可取更长值至上限 {max_dur} 秒，"
-            "不要默认挑最短值"
+            "不要默认挑最短值\n"
+            f"{speech_duration_rule}"
         )
     else:
         duration_rules = (
             f"- 时长：只能取 {durations_str} 中的值（该视频模型支持的秒数集合）\n"
-            f"- 按画面内容复杂度匹配合适时长（最长 {max_dur} 秒），不强制默认值"
+            f"- 按画面内容复杂度匹配合适时长（最长 {max_dur} 秒），不强制默认值\n"
+            f"{speech_duration_rule}"
         )
 
     return f"""你的任务是将小说原文改编为结构化的分镜场景表（Markdown 格式），用于后续 AI 视频生成。
@@ -411,6 +425,7 @@ def build_normalize_prompt(
 - segment_break：场景切换点标记"是"，同一连续场景标"否"
 - 每个场景应为一个独立的视觉画面，可以在指定时长内完成
 - 避免一个场景包含多个不同的动作或画面切换
+- 每个场景至少包含一个推进点：有人说出关键信息、角色做出推动局面的具体动作、场景状态明显变化，或出现可见后果；不要只写人物站立、凝视、走路、沉默或纯环境展示
 
 仅输出 Markdown 表格，不要包含其他解释文字。
 """
