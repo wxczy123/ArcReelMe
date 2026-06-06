@@ -106,5 +106,5 @@ class TestProviderRegistry:
         meta = PROVIDER_REGISTRY["xyq-web"]
         video_models = {mid: m for mid, m in meta.models.items() if m.media_type == "video"}
         assert set(video_models) == {"seedance-2.0", "seedance-2.0-fast"}
-        assert video_models["seedance-2.0"].default is True
-        assert video_models["seedance-2.0-fast"].default is False
+        assert video_models["seedance-2.0"].default is False
+        assert video_models["seedance-2.0-fast"].default is True

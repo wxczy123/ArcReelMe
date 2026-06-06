@@ -252,6 +252,34 @@ function normalizeExportDiagnostics(value: unknown): ExportDiagnostics {
 
 const API_BASE = "/api/v1";
 
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+
+  const asciiMatch = value.match(/filename="?([^";]+)"?/i);
+  return asciiMatch?.[1]?.trim() || null;
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /**
  * 检查 fetch 响应状态，抛出包含后端错误信息的 Error。
  * 用于不经过 API.request() 的自定义 fetch 调用。
@@ -456,12 +484,39 @@ class API {
   /** 构造剪映草稿下载 URL */
   static getJianyingDraftDownloadUrl(
     projectName: string,
-    episode: number,
+    episodes: number[],
     draftPath: string,
     downloadToken: string,
     jianyingVersion: string = "6",
   ): string {
-    return `${API_BASE}/projects/${encodeURIComponent(projectName)}/export/jianying-draft?episode=${encodeURIComponent(episode)}&draft_path=${encodeURIComponent(draftPath)}&download_token=${encodeURIComponent(downloadToken)}&jianying_version=${encodeURIComponent(jianyingVersion)}`;
+    const params = new URLSearchParams({
+      draft_path: draftPath,
+      download_token: downloadToken,
+      jianying_version: jianyingVersion,
+    });
+    params.set("episodes", episodes.join(","));
+    return `${API_BASE}/projects/${encodeURIComponent(projectName)}/export/jianying-draft?${params.toString()}`;
+  }
+
+  /** 下载文件并在完整读取后再交给浏览器保存，避免保存被截断的 ZIP。 */
+  static async downloadUrlAsFile(
+    url: string,
+    fallbackFilename: string,
+  ): Promise<{ filename: string; bytes: number }> {
+    const response = await fetch(url, withAuth());
+    await throwIfNotOk(response, "下载失败");
+
+    const blob = await response.blob();
+    const expectedSize = Number(response.headers.get("content-length") ?? 0);
+    if (Number.isFinite(expectedSize) && expectedSize > 0 && blob.size !== expectedSize) {
+      throw new Error(`下载不完整：应为 ${expectedSize} 字节，实际为 ${blob.size} 字节`);
+    }
+
+    const filename =
+      filenameFromContentDisposition(response.headers.get("content-disposition")) ||
+      fallbackFilename;
+    triggerBlobDownload(blob, filename);
+    return { filename, bytes: blob.size };
   }
 
   static async importProject(

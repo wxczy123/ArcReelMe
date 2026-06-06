@@ -53,8 +53,8 @@ _XYQ_VIDEO_DURATION_STORAGE_KEYS = (
     "__pippitcn_home_agentVideoDuration",
 )
 _XYQ_VIDEO_MODEL_MENU_PATTERNS: dict[str, str | re.Pattern[str]] = {
-    XYQ_VIDEO_MODEL_SEEDANCE_2: re.compile(r"^Seedance 2\.0(?! Fast)"),
-    XYQ_VIDEO_MODEL_SEEDANCE_2_FAST: re.compile(r"^Seedance 2\.0 Fast.*(高性价比|更快更便宜)"),
+    XYQ_VIDEO_MODEL_SEEDANCE_2: re.compile(r"^Seedance 2\.0$"),
+    XYQ_VIDEO_MODEL_SEEDANCE_2_FAST: re.compile(r"^Seedance 2\.0 Fast$"),
 }
 _PREVIEW_CONTAINER_SELECTOR = (
     "[role=dialog], "
@@ -142,7 +142,7 @@ def _normalize_aspect_ratio(aspect_ratio: str | None) -> Literal["16:9", "9:16",
 def _normalize_duration(duration: int | None) -> int:
     if not duration:
         return 5
-    return max(1, min(15, int(duration)))
+    return max(4, min(15, int(duration)))
 
 
 def _display_name_from_stage(path: Path) -> str:
@@ -630,6 +630,9 @@ class XyqWebRunner:
             await self._select_video_model(page)
             await self._select_aspect_ratio(page, aspect_ratio)
             last_seen = await self._read_visible_video_duration(page)
+            if last_seen != duration:
+                await self._set_visible_video_duration(page, duration)
+                last_seen = await self._read_visible_video_duration(page)
             if last_seen == duration:
                 return
             logger.warning(
@@ -673,25 +676,47 @@ class XyqWebRunner:
                     return int(match.group(1))
         return None
 
+    async def _set_visible_video_duration(self, page, duration: int) -> None:
+        opened = await self._click_toolbar_button(page, text_pattern=r"^\d+秒$")
+        if not opened:
+            logger.info("小云雀新版视频时长入口未找到，跳过数字输入兜底")
+            return
+
+        inputs = (
+            page.locator("input.videoPartDurationNumberInput-BUXHCL"),
+            page.locator("input[type=number][min][max]"),
+        )
+        for locator in inputs:
+            try:
+                target = locator.last
+                await target.wait_for(timeout=5_000)
+                await target.fill(str(duration), timeout=5_000)
+                await target.press("Enter", timeout=2_000)
+                await page.wait_for_timeout(500)
+                return
+            except Exception:
+                continue
+        logger.info("小云雀已打开视频时长入口，但未找到数字输入框")
+
     async def _select_image_model(self, page) -> None:
         if self.model != XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC:
             logger.info("小云雀图片 model=%s 暂按 Seedream 4.0 美感版选择", self.model)
-        await self._open_model_dropdown(page)
+        await self._open_model_dropdown(page, family_pattern="Seedream")
         await self._click_model_option(page, "Seedream 4.0 美感版")
 
     async def _select_video_model(self, page) -> None:
         pattern = _XYQ_VIDEO_MODEL_MENU_PATTERNS.get(self.model)
         if pattern is None:
-            logger.warning("小云雀视频 model=%s 暂不支持页面选择，回退到 Seedance 2.0", self.model)
-            pattern = _XYQ_VIDEO_MODEL_MENU_PATTERNS[XYQ_VIDEO_MODEL_SEEDANCE_2]
-        await self._open_model_dropdown(page)
+            logger.warning("小云雀视频 model=%s 暂不支持页面选择，回退到 Seedance 2.0 Fast", self.model)
+            pattern = _XYQ_VIDEO_MODEL_MENU_PATTERNS[XYQ_VIDEO_MODEL_SEEDANCE_2_FAST]
+        await self._open_model_dropdown(page, family_pattern="Seedance")
         await self._click_model_option(page, pattern)
 
     async def _click_model_option(self, page, pattern: str | re.Pattern[str]) -> None:
         candidates = [
+            page.locator("[role=option], [role=menuitem], button, div").filter(has_text=pattern).last,
             page.get_by_text(pattern).last,
             page.locator("div").filter(has_text=pattern).last,
-            page.locator("[role=option], [role=menuitem], button, div").filter(has_text=pattern).last,
         ]
         errors: list[str] = []
         for locator in candidates:
@@ -702,26 +727,34 @@ class XyqWebRunner:
                 errors.append(str(exc).splitlines()[0])
         raise RuntimeError(f"小云雀未能选择模型 {pattern!r}: {'; '.join(errors[-3:])}")
 
-    async def _open_model_dropdown(self, page) -> None:
+    async def _open_model_dropdown(self, page, *, family_pattern: str = "Seedream|Seedance") -> None:
+        if await self._click_toolbar_button(page, text_pattern=family_pattern):
+            return
         try:
             await page.locator(".lucide.lucide-chevron-down").first.click(timeout=8_000)
         except Exception:
-            await page.get_by_text(re.compile("Seedream|Seedance")).first.click(timeout=8_000)
+            await page.get_by_text(re.compile(family_pattern)).first.click(timeout=8_000)
 
     async def _select_aspect_ratio(self, page, aspect_ratio: str) -> None:
         ratio = _normalize_aspect_ratio(aspect_ratio)
         candidates = {
-            "16:9": [":9（横屏）", "16:9（横屏）"],
-            "9:16": [":16（竖屏）", "9:16（竖屏）"],
+            "16:9": ["16:9（横屏）", ":9（横屏）"],
+            "9:16": ["9:16（竖屏）", ":16（竖屏）"],
             "1:1": ["1:1", "方屏"],
         }[ratio]
 
-        try:
-            await page.locator(".trigger-Mt5lwU").first.click(timeout=8_000)
-        except Exception:
-            await page.get_by_role("menuitem", name=re.compile("9|16|1:1")).first.click(timeout=8_000)
+        if not await self._click_toolbar_button(page, exact_text="比例"):
+            try:
+                await page.locator(".trigger-Mt5lwU").first.click(timeout=8_000)
+            except Exception:
+                await page.get_by_role("menuitem", name=re.compile("9|16|1:1")).first.click(timeout=8_000)
 
         for text in candidates:
+            try:
+                await page.get_by_role("menuitem", name=text, exact=True).click(timeout=5_000)
+                return
+            except Exception:
+                pass
             try:
                 await page.locator("div").filter(has_text=text).last.click(timeout=5_000)
                 return
@@ -733,6 +766,9 @@ class XyqWebRunner:
         names = ("全能参考", "首尾帧")
         opened = False
         for name in names:
+            if await self._click_toolbar_button(page, exact_text=name):
+                opened = True
+                break
             try:
                 await page.get_by_role("button", name=name, exact=True).click(timeout=5_000)
                 opened = True
@@ -750,15 +786,79 @@ class XyqWebRunner:
         except Exception:
             logger.warning("小云雀未能切换参考模式到 %s，继续使用页面当前模式", mode)
 
+    async def _click_toolbar_button(
+        self,
+        page,
+        *,
+        exact_text: str | None = None,
+        text_pattern: str | None = None,
+        title: str | None = None,
+        aria_label: str | None = None,
+    ) -> bool:
+        try:
+            return bool(
+                await page.evaluate(
+                    """({exactText, textPattern, title, ariaLabel}) => {
+                        const re = textPattern ? new RegExp(textPattern) : null;
+                        const buttons = Array.from(document.querySelectorAll("button"));
+                        const button = buttons.find((el) => {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width <= 0 || rect.height <= 0) return false;
+                            const style = window.getComputedStyle(el);
+                            if (style.display === "none" || style.visibility === "hidden") return false;
+                            const cls = String(el.className || "");
+                            const isToolbar = (
+                                cls.includes("operationItem-") ||
+                                cls.includes("uploadConfigButton-") ||
+                                cls.includes("configScrollArrow-")
+                            );
+                            if (!isToolbar) return false;
+                            const text = (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+                            const elTitle = el.getAttribute("title") || "";
+                            const elAria = el.getAttribute("aria-label") || "";
+                            if (exactText && text !== exactText) return false;
+                            if (re && !re.test(text)) return false;
+                            if (title && elTitle !== title) return false;
+                            if (ariaLabel && elAria !== ariaLabel) return false;
+                            return true;
+                        });
+                        if (!button) return false;
+                        button.click();
+                        return true;
+                    }""",
+                    {
+                        "exactText": exact_text,
+                        "textPattern": text_pattern,
+                        "title": title,
+                        "ariaLabel": aria_label,
+                    },
+                )
+            )
+        except Exception:
+            return False
+
     async def _upload_references(self, page, references: list[_PreparedReference]) -> None:
         if not references:
             return
-        await page.get_by_role("button", name="上传参考素材").click(timeout=20_000)
         for ref in references:
+            await self._open_reference_upload_menu(page)
             await self._upload_one_reference(page, ref)
             await self._wait_reference_uploaded(page, ref)
             await page.wait_for_timeout(800)
         await self._close_upload_panel(page)
+
+    async def _open_reference_upload_menu(self, page) -> None:
+        try:
+            if await page.get_by_role("button", name=re.compile("本地上传")).first.is_visible(timeout=500):
+                return
+        except Exception:
+            pass
+        if not await self._click_toolbar_button(page, title="上传参考素材"):
+            await page.get_by_role("button", name="上传参考素材").click(timeout=20_000)
+        try:
+            await page.get_by_role("button", name=re.compile("本地上传")).first.wait_for(timeout=8_000)
+        except Exception as exc:
+            raise RuntimeError("小云雀未能打开上传参考素材菜单") from exc
 
     async def _upload_one_reference(self, page, ref: _PreparedReference) -> None:
         # 小云雀页面里同时存在“导入预设”等上传入口。必须避开预设入口，
@@ -775,10 +875,11 @@ class XyqWebRunner:
                     await local_upload.click(timeout=12_000)
                 file_chooser = await chooser_info.value
                 accept = (await file_chooser.element.get_attribute("accept")) or ""
-                if accept and not self._accepts_image_file(accept):
+                is_reference_context = self._looks_like_reference_upload_context(context_levels)
+                if accept and not self._accepts_image_file(accept) and not is_reference_context:
                     logger.info("小云雀跳过非图片 file chooser: accept=%s context=%s", accept, context[:120])
                     continue
-                if not accept and not self._looks_like_reference_upload_context(context_levels):
+                if not accept and not is_reference_context:
                     logger.info("小云雀跳过未声明图片格式的本地上传入口: context=%s", context[:120])
                     continue
                 await file_chooser.set_files(str(ref.staged_path), timeout=20_000)
@@ -862,7 +963,7 @@ class XyqWebRunner:
 
     def _looks_like_reference_upload_context(self, levels: list[str]) -> bool:
         text = " | ".join(levels)
-        return bool(re.search(r"参考|素材|图片|上传参考|角色与素材", text or ""))
+        return bool(re.search(r"参考|素材|图片|上传参考|角色与素材|本地上传|资产库", text or ""))
 
     def _accepts_image_file(self, accept: str) -> bool:
         return bool(re.search(r"image|png|jpe?g|webp", accept or "", re.I))
@@ -875,7 +976,7 @@ class XyqWebRunner:
         ]
         for locator in candidates:
             try:
-                await locator.last.wait_for(timeout=5_000)
+                await locator.last.wait_for(timeout=20_000)
                 return
             except Exception:
                 continue

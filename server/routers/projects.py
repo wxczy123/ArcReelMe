@@ -299,16 +299,48 @@ def _validate_draft_path(draft_path: str, _t: Callable[..., str]) -> str:
     return draft_path.strip()
 
 
+def _parse_jianying_episodes(
+    *,
+    episode: int | None,
+    episodes: str | None,
+    _t: Callable[..., str],
+) -> list[int]:
+    """解析剪映草稿导出的集数参数，兼容单集 episode 与批量 episodes。"""
+    if episodes is None or not episodes.strip():
+        if episode is None:
+            raise HTTPException(status_code=422, detail=_t("jianying_episode_required"))
+        if episode <= 0:
+            raise HTTPException(status_code=422, detail=_t("jianying_episode_invalid"))
+        return [episode]
+
+    parsed: list[int] = []
+    for raw in episodes.split(","):
+        value = raw.strip()
+        if not value:
+            continue
+        try:
+            parsed.append(int(value))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=_t("jianying_episode_invalid")) from None
+
+    if not parsed:
+        raise HTTPException(status_code=422, detail=_t("jianying_episode_required"))
+    if any(item <= 0 for item in parsed):
+        raise HTTPException(status_code=422, detail=_t("jianying_episode_invalid"))
+    return list(dict.fromkeys(parsed))
+
+
 @router.get("/projects/{name}/export/jianying-draft")
 def export_jianying_draft(
     name: str,
     _t: Translator,
-    episode: int = Query(..., description="集数编号"),
+    episode: int | None = Query(None, description="集数编号"),
+    episodes: str | None = Query(None, description="批量集数编号，逗号分隔"),
     draft_path: str = Query(..., description="用户本地剪映草稿目录"),
     download_token: str = Query(..., description="下载 token"),
     jianying_version: str = Query("6", description="剪映版本：6 或 5"),
 ):
-    """导出指定集的剪映草稿 ZIP"""
+    """导出一集或多集剪映草稿 ZIP"""
     import jwt as pyjwt
 
     # 1. 验证 download_token
@@ -323,30 +355,43 @@ def export_jianying_draft(
 
     # 2. 校验 draft_path
     draft_path = _validate_draft_path(draft_path, _t)
+    selected_episodes = _parse_jianying_episodes(episode=episode, episodes=episodes, _t=_t)
+    use_combined_export = episodes is not None and bool(episodes.strip())
 
     # 3. 调用服务
     svc = get_jianying_draft_service()
     try:
-        zip_path = svc.export_episode_draft(
-            project_name=name,
-            episode=episode,
-            draft_path=draft_path,
-            use_draft_info_name=(jianying_version != "5"),
-        )
+        if len(selected_episodes) == 1 and not use_combined_export:
+            zip_path = svc.export_episode_draft(
+                project_name=name,
+                episode=selected_episodes[0],
+                draft_path=draft_path,
+                use_draft_info_name=(jianying_version != "5"),
+            )
+            download_name = f"{name}_episode_{selected_episodes[0]}_jianying_draft.zip"
+        else:
+            zip_path = svc.export_episodes_drafts(
+                project_name=name,
+                episodes=selected_episodes,
+                draft_path=draft_path,
+                use_draft_info_name=(jianying_version != "5"),
+            )
+            episode_label = "-".join(str(item) for item in selected_episodes)
+            download_name = f"{name}_episodes_{episode_label}_jianying_drafts.zip"
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception:
-        logger.exception("剪映草稿导出失败: project=%s episode=%d", name, episode)
+        logger.exception("剪映草稿导出失败: project=%s episodes=%s", name, selected_episodes)
         raise HTTPException(status_code=500, detail=_t("jianying_export_failed"))
 
-    download_name = f"{name}_episode_{episode}_jianying_draft.zip"
-
+    stat_result = os.stat(zip_path)
     return FileResponse(
         path=str(zip_path),
         media_type="application/zip",
         filename=download_name,
+        stat_result=stat_result,
         background=BackgroundTask(_cleanup_temp_dir, str(zip_path.parent)),
     )
 

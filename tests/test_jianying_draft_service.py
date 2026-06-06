@@ -78,6 +78,46 @@ class TestCollectVideoClips:
         assert clips[0]["id"] == "E1S01"
         assert clips[0]["novel_text"] == ""
 
+    def test_reference_video_mode_collects_video_units(self, tmp_path):
+        """reference_video 模式：收集 video_units 中的 reference_videos。"""
+        from server.services.jianying_draft_service import JianyingDraftService
+
+        project_dir = tmp_path / "projects" / "demo"
+        video_dir = project_dir / "reference_videos"
+        video_dir.mkdir(parents=True)
+        (video_dir / "E1U01.mp4").write_bytes(b"fake")
+
+        script = {
+            "content_mode": "drama",
+            "generation_mode": "reference_video",
+            "scenes": [],
+            "video_units": [
+                {
+                    "unit_id": "E1U01",
+                    "duration_seconds": 10,
+                    "transition_to_next": "fade",
+                    "generated_assets": {
+                        "video_clip": "reference_videos/E1U01.mp4",
+                        "status": "completed",
+                    },
+                },
+                {
+                    "unit_id": "E1U02",
+                    "duration_seconds": 8,
+                    "generated_assets": {"status": "pending"},
+                },
+            ],
+        }
+
+        svc = JianyingDraftService.__new__(JianyingDraftService)
+        clips = svc._collect_video_clips(script, project_dir)
+
+        assert len(clips) == 1
+        assert clips[0]["id"] == "E1U01"
+        assert clips[0]["video_clip"] == "reference_videos/E1U01.mp4"
+        assert clips[0]["duration_seconds"] == 10
+        assert clips[0]["transition_to_next"] == "fade"
+
     def test_skips_missing_video_files(self, tmp_path):
         """script 中有记录但文件不存在时跳过"""
         from server.services.jianying_draft_service import JianyingDraftService
@@ -393,10 +433,112 @@ class TestExportEpisodeDraft:
 
         with zipfile.ZipFile(zip_path) as zf:
             names = zf.namelist()
+            assert any("draft_content.json" in n for n in names)
             assert any("draft_info.json" in n for n in names)
             assert any("draft_meta_info.json" in n for n in names)
             assert any("segment_S1.mp4" in n for n in names)
             assert any("segment_S2.mp4" in n for n in names)
+
+    def test_exports_zip_with_scannable_draft_metadata(self, tmp_path):
+        """导出 ZIP 补齐剪映草稿列表扫描需要的元信息"""
+        from server.services.jianying_draft_service import JianyingDraftService
+
+        pm, _ = self._setup_project(tmp_path)
+        svc = JianyingDraftService(pm)
+        draft_path = r"C:\Users\test\AppData\Local\JianyingPro\User Data\Projects\com.lveditor.draft"
+
+        zip_path = svc.export_episode_draft(project_name="demo", episode=1, draft_path=draft_path)
+
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            content_entry = [n for n in names if n.endswith("draft_content.json")][0]
+            info_entry = [n for n in names if n.endswith("draft_info.json")][0]
+            meta_entry = [n for n in names if n.endswith("draft_meta_info.json")][0]
+            content = json.loads(zf.read(content_entry).decode("utf-8"))
+            info = json.loads(zf.read(info_entry).decode("utf-8"))
+            meta = json.loads(zf.read(meta_entry).decode("utf-8"))
+
+            assert content["name"] == "测试项目_第1集"
+            assert content["id"]
+            assert content["create_time"] > 0
+            assert content["update_time"] > 0
+            assert info["id"] == content["id"]
+            assert info["name"] == content["name"]
+            assert meta["draft_id"] == content["id"]
+            assert meta["draft_name"] == content["name"]
+            assert meta["draft_fold_path"] == draft_path.replace("\\", "/")
+            assert meta["draft_root_path"] == f"{draft_path.replace('\\', '/')}/测试项目_第1集"
+            video_paths = [video["path"] for video in content["materials"]["videos"]]
+            assert all(path.startswith(f"{draft_path.replace('\\', '/')}/测试项目_第1集/assets/") for path in video_paths)
+            assert all("\\" not in path for path in video_paths)
+            video_materials = next(item for item in meta["draft_materials"] if item["type"] == 0)["value"]
+            assert len(video_materials) == len(content["materials"]["videos"])
+            assert {item["file_Path"] for item in video_materials} == set(video_paths)
+            assert {item["id"] for item in video_materials} == {
+                video["id"] for video in content["materials"]["videos"]
+            }
+
+    def test_exports_multiple_episodes_as_separate_drafts(self, tmp_path):
+        """批量导出时，一个 ZIP 内包含多个独立的剪映草稿目录"""
+        from server.services.jianying_draft_service import JianyingDraftService
+
+        pm, project_dir = self._setup_project(tmp_path)
+        videos_dir = project_dir / "videos"
+        make_test_video(videos_dir / "segment_E2S1.mp4")
+        scripts_dir = project_dir / "scripts"
+        project_data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+        project_data["episodes"].append({"episode": 2, "title": "第二集", "script_file": "scripts/episode_2.json"})
+        (project_dir / "project.json").write_text(json.dumps(project_data, ensure_ascii=False), encoding="utf-8")
+        (scripts_dir / "episode_2.json").write_text(
+            json.dumps(
+                {
+                    "content_mode": "narration",
+                    "segments": [
+                        {
+                            "segment_id": "S1",
+                            "duration_seconds": 8,
+                            "novel_text": "第二集文本",
+                            "generated_assets": {"video_clip": "videos/segment_E2S1.mp4", "status": "completed"},
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        svc = JianyingDraftService(pm)
+        zip_path = svc.export_episodes_drafts(
+            project_name="demo",
+            episodes=[1, 2],
+            draft_path="/Users/test/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
+        )
+
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            roots = {name.split("/")[0] for name in names}
+            assert roots == {"测试项目_第1集", "测试项目_第2集"}
+            assert "测试项目_第1集/draft_content.json" in names
+            assert "测试项目_第1集/draft_meta_info.json" in names
+            assert "测试项目_第1集/draft_info.json" in names
+            assert "测试项目_第1集/assets/segment_S1.mp4" in names
+            assert "测试项目_第1集/assets/segment_S2.mp4" in names
+            assert "测试项目_第2集/draft_content.json" in names
+            assert "测试项目_第2集/draft_meta_info.json" in names
+            assert "测试项目_第2集/draft_info.json" in names
+            assert "测试项目_第2集/assets/segment_E2S1.mp4" in names
+
+            ep1_content = json.loads(zf.read("测试项目_第1集/draft_content.json").decode("utf-8"))
+            ep1_meta = json.loads(zf.read("测试项目_第1集/draft_meta_info.json").decode("utf-8"))
+            ep2_content = json.loads(zf.read("测试项目_第2集/draft_content.json").decode("utf-8"))
+            ep2_meta = json.loads(zf.read("测试项目_第2集/draft_meta_info.json").decode("utf-8"))
+            assert ep1_content["name"] == "测试项目_第1集"
+            assert ep1_meta["draft_name"] == "测试项目_第1集"
+            assert ep2_content["name"] == "测试项目_第2集"
+            assert ep2_meta["draft_name"] == "测试项目_第2集"
+            assert len(ep1_content["materials"]["videos"]) == 2
+            assert len(ep2_content["materials"]["videos"]) == 1
+            assert zf.testzip() is None
 
     def test_draft_content_has_user_paths(self, tmp_path):
         """draft_info.json 中的路径已替换为用户本地路径"""

@@ -38,7 +38,7 @@ class XyqWebVideoBackend:
         timeout_seconds: str | int | None = None,
         **_: object,
     ) -> None:
-        self._model = model or XYQ_VIDEO_MODEL_SEEDANCE_2
+        self._model = model or XYQ_VIDEO_MODEL_SEEDANCE_2_FAST
         self._runner = XyqWebRunner(
             model=self._model,
             profile_dir=profile_dir,

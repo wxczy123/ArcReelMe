@@ -634,6 +634,7 @@ def _test_xyq_web(config: dict[str, str], _t: Callable[..., str]) -> ConnectionT
         XYQ_DEFAULT_PROFILE_DIR,
         XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC,
         XYQ_VIDEO_MODEL_SEEDANCE_2,
+        XYQ_VIDEO_MODEL_SEEDANCE_2_FAST,
     )
 
     if importlib.util.find_spec("playwright") is None:
@@ -651,7 +652,11 @@ def _test_xyq_web(config: dict[str, str], _t: Callable[..., str]) -> ConnectionT
         )
     return ConnectionTestResponse(
         success=True,
-        available_models=[XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC, XYQ_VIDEO_MODEL_SEEDANCE_2],
+        available_models=[
+            XYQ_IMAGE_MODEL_SEEDREAM_4_AESTHETIC,
+            XYQ_VIDEO_MODEL_SEEDANCE_2,
+            XYQ_VIDEO_MODEL_SEEDANCE_2_FAST,
+        ],
         message=_t("connection_success"),
     )
 

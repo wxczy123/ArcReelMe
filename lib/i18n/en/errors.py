@@ -8,6 +8,8 @@ MESSAGES = {
     "jianying_path_invalid": "Please provide a valid Jianying draft directory path",
     "jianying_path_too_long": "Draft directory path is too long",
     "jianying_path_illegal": "Draft directory path contains illegal characters",
+    "jianying_episode_required": "Please select at least one episode",
+    "jianying_episode_invalid": "Episode parameter is invalid",
     "jianying_export_failed": "Jianying draft export failed, please try again later",
     "title_required": "Project title cannot be empty",
     "project_exists": "Project '{name}' already exists",

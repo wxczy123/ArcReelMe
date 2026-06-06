@@ -107,25 +107,30 @@ export function GlobalHeader({ onNavigateBack }: GlobalHeaderProps) {
   };
 
   const handleJianyingExport = async (
-    episode: number,
+    episodes: number[],
     draftPath: string,
     jianyingVersion: string,
   ) => {
-    if (!currentProjectName || jianyingExporting) return;
+    if (!currentProjectName || jianyingExporting || episodes.length === 0) return;
 
     setJianyingExporting(true);
     try {
       const { download_token } = await API.requestExportToken(currentProjectName, "current");
       const url = API.getJianyingDraftDownloadUrl(
         currentProjectName,
-        episode,
+        episodes,
         draftPath,
         download_token,
         jianyingVersion,
       );
-      triggerBrowserDownload(url);
+      const episodeLabel = episodes.length === 1 ? String(episodes[0]) : episodes.join("-");
+      useAppStore.getState().pushToast(t("dashboard:jianying_export_packaging"), "success");
+      await API.downloadUrlAsFile(
+        url,
+        `${currentProjectName}_episodes_${episodeLabel}_jianying_drafts.zip`,
+      );
       setExportDialogOpen(false);
-      useAppStore.getState().pushToast(t("dashboard:jianying_export_started"), "success");
+      useAppStore.getState().pushToast(t("dashboard:jianying_export_downloaded"), "success");
     } catch (err) {
       useAppStore
         .getState()

@@ -8,6 +8,8 @@ MESSAGES = {
     "jianying_path_invalid": "Vui lòng cung cấp đường dẫn thư mục bản nháp Jianying hợp lệ",
     "jianying_path_too_long": "Đường dẫn thư mục bản nháp quá dài",
     "jianying_path_illegal": "Đường dẫn thư mục bản nháp chứa ký tự không hợp lệ",
+    "jianying_episode_required": "Vui lòng chọn ít nhất một tập",
+    "jianying_episode_invalid": "Tham số tập không hợp lệ",
     "jianying_export_failed": "Xuất bản nháp Jianying thất bại, vui lòng thử lại sau",
     "title_required": "Tên dự án không được để trống",
     "project_exists": "Dự án '{name}' đã tồn tại",

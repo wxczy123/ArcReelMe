@@ -24,7 +24,7 @@ interface ExportScopeDialogProps {
   onSelect: (scope: ExportScope) => void;
   anchorRef: RefObject<HTMLElement | null>;
   episodes?: EpisodeMeta[];
-  onJianyingExport?: (episode: number, draftPath: string, jianyingVersion: string) => void;
+  onJianyingExport?: (episodes: number[], draftPath: string, jianyingVersion: string) => void;
   jianyingExporting?: boolean;
 }
 
@@ -39,8 +39,8 @@ export function ExportScopeDialog({
 }: ExportScopeDialogProps) {
   const { t } = useTranslation(["dashboard", "common"]);
   const [mode, setMode] = useState<"select" | "jianying-form">("select");
-  const [selectedEpisode, setSelectedEpisode] = useState<number>(
-    episodes.length > 0 ? episodes[0].episode : 1,
+  const [selectedEpisodes, setSelectedEpisodes] = useState<number[]>(
+    () => episodes.map((ep) => ep.episode),
   );
   const isWindows =
     typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
@@ -62,14 +62,31 @@ export function ExportScopeDialog({
   useEffect(() => {
     if (episodes.length > 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- episodes prop 变化时同步表单默认值，受控拷贝是有意设计
-      setSelectedEpisode(episodes[0].episode);
+      setSelectedEpisodes(episodes.map((ep) => ep.episode));
     }
   }, [episodes]);
 
+  const toggleEpisode = (episode: number) => {
+    setSelectedEpisodes((current) => {
+      if (current.includes(episode)) {
+        return current.filter((item) => item !== episode);
+      }
+      return [...current, episode].sort((a, b) => a - b);
+    });
+  };
+
+  const selectAllEpisodes = () => {
+    setSelectedEpisodes(episodes.map((ep) => ep.episode));
+  };
+
+  const clearSelectedEpisodes = () => {
+    setSelectedEpisodes([]);
+  };
+
   const handleJianyingSubmit = () => {
-    if (!draftPath.trim() || !onJianyingExport) return;
+    if (!draftPath.trim() || selectedEpisodes.length === 0 || !onJianyingExport) return;
     localStorage.setItem(DRAFT_PATH_STORAGE_KEY, draftPath.trim());
-    onJianyingExport(selectedEpisode, draftPath.trim(), jianyingVersion);
+    onJianyingExport(selectedEpisodes, draftPath.trim(), jianyingVersion);
   };
 
   return (
@@ -186,31 +203,73 @@ export function ExportScopeDialog({
             </div>
           </div>
           <div className="flex flex-col gap-3">
-            {episodes.length > 1 && (
+            {episodes.length > 0 && (
               <FormField
-                htmlFor="jianying-episode-select"
-                label={t("dashboard:select_episode")}
+                htmlFor="jianying-episode-list"
+                label={t("dashboard:select_episodes")}
+                hint={t("dashboard:selected_episode_count", { count: selectedEpisodes.length })}
               >
-                <select
-                  id="jianying-episode-select"
-                  value={selectedEpisode}
-                  onChange={(e) => setSelectedEpisode(Number(e.target.value))}
-                  className="focus-ring w-full rounded-md px-2.5 py-1.5 text-[13px] outline-none"
+                <div className="flex items-center gap-2 pb-2">
+                  <button
+                    type="button"
+                    onClick={selectAllEpisodes}
+                    className="focus-ring rounded-md px-2 py-1 text-[12px]"
+                    style={{
+                      background: "oklch(0.20 0.011 265 / 0.55)",
+                      border: "1px solid var(--color-hairline)",
+                      color: "var(--color-text-2)",
+                    }}
+                  >
+                    {t("dashboard:select_all_episodes")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelectedEpisodes}
+                    className="focus-ring rounded-md px-2 py-1 text-[12px]"
+                    style={{
+                      background: "oklch(0.20 0.011 265 / 0.55)",
+                      border: "1px solid var(--color-hairline)",
+                      color: "var(--color-text-3)",
+                    }}
+                  >
+                    {t("dashboard:clear_episodes")}
+                  </button>
+                </div>
+                <div
+                  id="jianying-episode-list"
+                  className="max-h-44 overflow-y-auto rounded-md"
                   style={{
                     background: "oklch(0.16 0.010 265 / 0.6)",
                     border: "1px solid var(--color-hairline)",
-                    color: "var(--color-text)",
                   }}
                 >
-                  {episodes.map((ep) => (
-                    <option key={ep.episode} value={ep.episode}>
-                      {t("dashboard:episode_with_title", {
-                        episode: ep.episode,
-                        title: ep.title,
-                      })}
-                    </option>
-                  ))}
-                </select>
+                  {episodes.map((ep) => {
+                    const checked = selectedEpisodes.includes(ep.episode);
+                    return (
+                      <label
+                        key={ep.episode}
+                        className="flex min-h-9 cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[13px]"
+                        style={{
+                          borderBottom: "1px solid var(--color-hairline)",
+                          color: "var(--color-text)",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleEpisode(ep.episode)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="min-w-0 truncate">
+                          {t("dashboard:episode_with_title", {
+                            episode: ep.episode,
+                            title: ep.title,
+                          })}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </FormField>
             )}
 
@@ -259,7 +318,7 @@ export function ExportScopeDialog({
               tone="warm"
               size="sm"
               onClick={handleJianyingSubmit}
-              disabled={!draftPath.trim() || jianyingExporting}
+              disabled={!draftPath.trim() || selectedEpisodes.length === 0 || jianyingExporting}
               leadingIcon={
                 jianyingExporting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

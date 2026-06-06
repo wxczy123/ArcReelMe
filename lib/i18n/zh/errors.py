@@ -8,6 +8,8 @@ MESSAGES = {
     "jianying_path_invalid": "请提供有效的剪映草稿目录路径",
     "jianying_path_too_long": "草稿目录路径过长",
     "jianying_path_illegal": "草稿目录路径包含非法字符",
+    "jianying_episode_required": "请选择至少一集",
+    "jianying_episode_invalid": "集数参数无效",
     "jianying_export_failed": "剪映草稿导出失败，请稍后重试",
     "title_required": "项目标题不能为空",
     "project_exists": "项目 '{name}' 已存在",
