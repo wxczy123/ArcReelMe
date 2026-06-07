@@ -97,12 +97,14 @@ describe("API", () => {
         "token",
         "6",
         false,
+        true,
       );
 
       expect(url).toContain("/api/v1/projects/demo/export/jianying-draft?");
       expect(url).toContain("episodes=1%2C3");
       expect(url).toContain("draft_path=C%3A%2Fdrafts");
       expect(url).toContain("combine=false");
+      expect(url).toContain("funasr_subtitles=true");
     });
   });
 

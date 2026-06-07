@@ -38,6 +38,7 @@ vi.mock("./ExportScopeDialog", () => ({
       draftPath: string,
       jianyingVersion: string,
       combineDrafts: boolean,
+      funasrSubtitles: boolean,
     ) => void;
     jianyingExporting?: boolean;
   }) =>

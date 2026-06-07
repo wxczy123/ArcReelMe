@@ -3,6 +3,7 @@
 import json
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -213,3 +214,40 @@ class TestJianyingDraftExport:
             params={"episode": 1, "draft_path": "/tmp", "download_token": token},
         )
         assert response.status_code == 403
+
+    def test_funasr_subtitles_param_passed_to_service(self, tmp_path, monkeypatch):
+        """funasr_subtitles 查询参数会传给剪映导出服务。"""
+        captured: dict[str, object] = {}
+        zip_path = tmp_path / "fake.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("draft/draft_content.json", "{}")
+
+        class FakeService:
+            def export_episode_draft(self, **kwargs):
+                captured.update(kwargs)
+                return Path(zip_path)
+
+        from server.routers import projects as proj_mod
+
+        monkeypatch.setattr(proj_mod, "get_jianying_draft_service", lambda: FakeService())
+        monkeypatch.setattr(
+            proj_mod,
+            "FileResponse",
+            lambda **kwargs: {"path": kwargs["path"], "filename": kwargs["filename"]},
+        )
+
+        token = create_download_token("testuser", "demo")
+        response = proj_mod.export_jianying_draft(
+            name="demo",
+            _t=lambda key, **_: key,
+            episode=1,
+            episodes=None,
+            draft_path="/tmp",
+            download_token=token,
+            jianying_version="6",
+            combine=True,
+            funasr_subtitles=True,
+        )
+
+        assert response["path"] == str(zip_path)
+        assert captured["funasr_subtitles"] is True

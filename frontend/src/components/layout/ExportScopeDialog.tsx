@@ -29,6 +29,7 @@ interface ExportScopeDialogProps {
     draftPath: string,
     jianyingVersion: string,
     combineDrafts: boolean,
+    funasrSubtitles: boolean,
   ) => void;
   jianyingExporting?: boolean;
 }
@@ -57,6 +58,7 @@ export function ExportScopeDialog({
   );
   const [jianyingVersion, setJianyingVersion] = useState("6");
   const [combineDrafts, setCombineDrafts] = useState(true);
+  const [funasrSubtitles, setFunasrSubtitles] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -92,7 +94,7 @@ export function ExportScopeDialog({
   const handleJianyingSubmit = () => {
     if (!draftPath.trim() || selectedEpisodes.length === 0 || !onJianyingExport) return;
     localStorage.setItem(DRAFT_PATH_STORAGE_KEY, draftPath.trim());
-    onJianyingExport(selectedEpisodes, draftPath.trim(), jianyingVersion, combineDrafts);
+    onJianyingExport(selectedEpisodes, draftPath.trim(), jianyingVersion, combineDrafts, funasrSubtitles);
   };
 
   return (
@@ -358,6 +360,30 @@ export function ExportScopeDialog({
                 <option value="6">{t("dashboard:jianying_v6_plus")}</option>
                 <option value="5">{t("dashboard:jianying_v5_x")}</option>
               </select>
+            </FormField>
+
+            <FormField
+              htmlFor="jianying-funasr-subtitles"
+              label={t("dashboard:funasr_subtitles")}
+              hint={t("dashboard:funasr_subtitles_hint")}
+            >
+              <label
+                className="flex cursor-pointer items-start gap-2 rounded-md p-2 text-[13px]"
+                style={{
+                  background: "oklch(0.16 0.010 265 / 0.6)",
+                  border: "1px solid var(--color-hairline)",
+                  color: "var(--color-text)",
+                }}
+              >
+                <input
+                  id="jianying-funasr-subtitles"
+                  type="checkbox"
+                  checked={funasrSubtitles}
+                  onChange={(e) => setFunasrSubtitles(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5"
+                />
+                <span className="min-w-0">{t("dashboard:funasr_subtitles_enabled")}</span>
+              </label>
             </FormField>
 
             <FormField

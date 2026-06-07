@@ -340,6 +340,7 @@ def export_jianying_draft(
     download_token: str = Query(..., description="下载 token"),
     jianying_version: str = Query("6", description="剪映版本：6 或 5"),
     combine: bool = Query(True, description="批量导出时是否合并为一个剪映草稿"),
+    funasr_subtitles: bool = Query(False, description="是否使用 FunASR 自动生成可编辑字幕轨"),
 ):
     """导出一集或多集剪映草稿 ZIP"""
     import jwt as pyjwt
@@ -368,6 +369,7 @@ def export_jianying_draft(
                 episode=selected_episodes[0],
                 draft_path=draft_path,
                 use_draft_info_name=(jianying_version != "5"),
+                funasr_subtitles=funasr_subtitles,
             )
             download_name = f"{name}_episode_{selected_episodes[0]}_jianying_draft.zip"
         else:
@@ -377,6 +379,7 @@ def export_jianying_draft(
                 draft_path=draft_path,
                 combine=combine,
                 use_draft_info_name=(jianying_version != "5"),
+                funasr_subtitles=funasr_subtitles,
             )
             episode_label = "-".join(str(item) for item in selected_episodes)
             download_name = f"{name}_episodes_{episode_label}_jianying_drafts.zip"

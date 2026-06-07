@@ -36,6 +36,7 @@ _TRANSITION_MAP: dict[str, TransitionType] = {
     "dissolve": TransitionType.叠化,
 }
 
+from lib.funasr_subtitles import SubtitleCue, transcribe_video_to_cues
 from lib.project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,7 @@ class JianyingDraftService:
         width: int,
         height: int,
         content_mode: str,
+        subtitle_cues_by_path: dict[str, list[SubtitleCue]] | None = None,
     ) -> None:
         """使用 pyJianYingDraft 在 draft_dir 中生成草稿文件"""
         draft_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -161,8 +163,10 @@ class JianyingDraftService:
         # 视频轨
         script_file.add_track(TrackType.video)
 
-        # 字幕轨（仅 narration 模式）
-        has_subtitle = content_mode == "narration"
+        # 字幕轨：FunASR 字幕优先；未开启时 narration 模式沿用原文字幕。
+        use_asr_subtitle = subtitle_cues_by_path is not None
+        subtitle_cues_by_path = subtitle_cues_by_path or {}
+        has_subtitle = use_asr_subtitle or content_mode == "narration"
         text_style: TextStyle | None = None
         text_border: TextBorder | None = None
         text_shadow: TextShadow | None = None
@@ -216,7 +220,26 @@ class JianyingDraftService:
             script_file.add_segment(video_seg)
 
             # 字幕片段
-            if has_subtitle and clip.get("novel_text"):
+            clip_subtitle_cues = subtitle_cues_by_path.get(str(clip["local_path"]), [])
+            if use_asr_subtitle:
+                if not clip_subtitle_cues:
+                    offset_us += actual_duration_us
+                    continue
+                for cue in clip_subtitle_cues:
+                    cue_start = max(0, min(cue.start_us, actual_duration_us - 1))
+                    cue_duration = min(max(100_000, cue.end_us - cue.start_us), actual_duration_us - cue_start)
+                    if cue_duration <= 0:
+                        continue
+                    text_seg = TextSegment(
+                        text=cue.text,
+                        timerange=trange(offset_us + cue_start, cue_duration),
+                        style=text_style,
+                        border=text_border,
+                        shadow=text_shadow,
+                        clip_settings=subtitle_position,
+                    )
+                    script_file.add_segment(text_seg)
+            elif has_subtitle and clip.get("novel_text"):
                 text_seg = TextSegment(
                     text=clip["novel_text"],
                     timerange=trange(offset_us, actual_duration_us),
@@ -230,6 +253,16 @@ class JianyingDraftService:
             offset_us += actual_duration_us
 
         script_file.save()
+
+    def _generate_subtitle_cues_for_clips(self, clips: list[dict[str, Any]]) -> dict[str, list[SubtitleCue]]:
+        """逐条视频生成 FunASR 字幕。"""
+        subtitles: dict[str, list[SubtitleCue]] = {}
+        for clip in clips:
+            local_path = str(clip["local_path"])
+            logger.info("开始 FunASR 字幕识别: clip=%s path=%s", clip.get("id"), local_path)
+            subtitles[local_path] = transcribe_video_to_cues(Path(local_path))
+            logger.info("FunASR 字幕识别完成: clip=%s cues=%d", clip.get("id"), len(subtitles[local_path]))
+        return subtitles
 
     def _replace_paths_in_draft(self, *, json_path: Path, tmp_prefix: str, target_prefix: str) -> None:
         """JSON 安全地替换 draft_content.json 中的临时路径"""
@@ -363,6 +396,7 @@ class JianyingDraftService:
         draft_path: str,
         tmp_dir: Path,
         use_draft_info_name: bool,
+        funasr_subtitles: bool,
     ) -> tuple[str, Path]:
         """在 tmp_dir 中生成某一集的剪映草稿目录。"""
         script_data, _ = self._find_episode_script(project_name, project, episode)
@@ -390,6 +424,7 @@ class JianyingDraftService:
                 shutil.copy2(src, dst)
             local_clips.append({**clip, "local_path": str(dst)})
 
+        subtitle_cues_by_path = self._generate_subtitle_cues_for_clips(local_clips) if funasr_subtitles else None
         draft_dir = tmp_dir / draft_name
         self._generate_draft(
             draft_dir=draft_dir,
@@ -398,6 +433,7 @@ class JianyingDraftService:
             width=width,
             height=height,
             content_mode=content_mode,
+            subtitle_cues_by_path=subtitle_cues_by_path,
         )
 
         assets_dir = draft_dir / "assets"
@@ -430,6 +466,7 @@ class JianyingDraftService:
         draft_path: str,
         tmp_dir: Path,
         use_draft_info_name: bool,
+        funasr_subtitles: bool,
     ) -> tuple[str, Path]:
         """在 tmp_dir 中生成选中剧集合并后的单个剪映草稿目录。"""
         raw_title = project.get("title", project_name)
@@ -460,6 +497,7 @@ class JianyingDraftService:
 
         content_mode = "narration" if content_modes and all(mode == "narration" for mode in content_modes) else "drama"
         width, height = self._resolve_canvas_size(project, first_video_path)
+        subtitle_cues_by_path = self._generate_subtitle_cues_for_clips(local_clips) if funasr_subtitles else None
         draft_dir = tmp_dir / draft_name
         self._generate_draft(
             draft_dir=draft_dir,
@@ -468,6 +506,7 @@ class JianyingDraftService:
             width=width,
             height=height,
             content_mode=content_mode,
+            subtitle_cues_by_path=subtitle_cues_by_path,
         )
 
         assets_dir = draft_dir / "assets"
@@ -501,6 +540,7 @@ class JianyingDraftService:
         draft_path: str,
         *,
         use_draft_info_name: bool = True,
+        funasr_subtitles: bool = False,
     ) -> Path:
         """
         导出指定集的剪映草稿 ZIP。
@@ -524,6 +564,7 @@ class JianyingDraftService:
                 draft_path=draft_path,
                 tmp_dir=tmp_dir,
                 use_draft_info_name=use_draft_info_name,
+                funasr_subtitles=funasr_subtitles,
             )
             zip_path = tmp_dir / f"{draft_name}.zip"
             self._zip_draft_dirs(zip_path=zip_path, draft_dirs=[(draft_name, draft_dir)])
@@ -541,6 +582,7 @@ class JianyingDraftService:
         *,
         combine: bool = True,
         use_draft_info_name: bool = True,
+        funasr_subtitles: bool = False,
     ) -> Path:
         """
         批量导出多集剪映草稿 ZIP。
@@ -568,6 +610,7 @@ class JianyingDraftService:
                     draft_path=draft_path,
                     tmp_dir=tmp_dir,
                     use_draft_info_name=use_draft_info_name,
+                    funasr_subtitles=funasr_subtitles,
                 )
                 draft_dirs = [(draft_name, draft_dir)]
             else:
@@ -580,6 +623,7 @@ class JianyingDraftService:
                         draft_path=draft_path,
                         tmp_dir=tmp_dir,
                         use_draft_info_name=use_draft_info_name,
+                        funasr_subtitles=funasr_subtitles,
                     )
                     for episode in unique_episodes
                 ]

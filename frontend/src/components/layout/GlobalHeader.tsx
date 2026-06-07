@@ -111,6 +111,7 @@ export function GlobalHeader({ onNavigateBack }: GlobalHeaderProps) {
     draftPath: string,
     jianyingVersion: string,
     combineDrafts: boolean,
+    funasrSubtitles: boolean,
   ) => {
     if (!currentProjectName || jianyingExporting || episodes.length === 0) return;
 
@@ -124,9 +125,15 @@ export function GlobalHeader({ onNavigateBack }: GlobalHeaderProps) {
         download_token,
         jianyingVersion,
         combineDrafts,
+        funasrSubtitles,
       );
       const episodeLabel = episodes.length === 1 ? String(episodes[0]) : episodes.join("-");
-      useAppStore.getState().pushToast(t("dashboard:jianying_export_packaging"), "success");
+      useAppStore
+        .getState()
+        .pushToast(
+          t(funasrSubtitles ? "dashboard:jianying_export_transcribing" : "dashboard:jianying_export_packaging"),
+          "success",
+        );
       await API.downloadUrlAsFile(
         url,
         `${currentProjectName}_episodes_${episodeLabel}_jianying_drafts.zip`,

@@ -5,6 +5,8 @@ import zipfile
 
 import pytest
 
+from lib.funasr_subtitles import SubtitleCue
+
 
 class TestCollectVideoClips:
     """测试从剧本中收集已完成视频片段"""
@@ -232,6 +234,45 @@ class TestGenerateDraft:
         tracks = content.get("tracks", [])
         assert len(tracks) == 2
 
+    def test_asr_subtitles_replace_narration_text(self, tmp_path):
+        """开启 ASR 字幕时，使用逐句时间戳字幕，而不是整段 novel_text。"""
+        from server.services.jianying_draft_service import JianyingDraftService
+
+        videos_dir = tmp_path / "videos"
+        videos_dir.mkdir()
+        video_path = videos_dir / "seg_S1.mp4"
+        make_test_video(video_path)
+
+        draft_dir = tmp_path / "drafts" / "ASR字幕草稿"
+        clips = [
+            {"id": "S1", "local_path": str(video_path), "novel_text": "整段原文不应直接写入"},
+        ]
+
+        svc = JianyingDraftService.__new__(JianyingDraftService)
+        svc._generate_draft(
+            draft_dir=draft_dir,
+            draft_name="ASR字幕草稿",
+            clips=clips,
+            width=1080,
+            height=1920,
+            content_mode="narration",
+            subtitle_cues_by_path={
+                str(video_path): [
+                    SubtitleCue(start_us=0, end_us=600_000, text="第一句"),
+                    SubtitleCue(start_us=700_000, end_us=1_200_000, text="第二句"),
+                ]
+            },
+        )
+
+        content = json.loads((draft_dir / "draft_content.json").read_text(encoding="utf-8"))
+        text_values = [
+            json.loads(item["content"])["text"]
+            for item in content.get("materials", {}).get("texts", [])
+        ]
+        assert "第一句" in text_values
+        assert "第二句" in text_values
+        assert "整段原文不应直接写入" not in text_values
+
     def test_drama_mode_no_subtitle_track(self, tmp_path):
         """drama 模式不生成字幕轨"""
         from server.services.jianying_draft_service import JianyingDraftService
@@ -438,6 +479,55 @@ class TestExportEpisodeDraft:
             assert any("draft_meta_info.json" in n for n in names)
             assert any("segment_S1.mp4" in n for n in names)
             assert any("segment_S2.mp4" in n for n in names)
+
+    def test_default_export_does_not_call_funasr(self, tmp_path, monkeypatch):
+        """默认关闭 FunASR 时，导出剪映草稿不得触发 ASR 识别。"""
+        from server.services.jianying_draft_service import JianyingDraftService
+
+        pm, project_dir = self._setup_project(tmp_path)
+        videos_dir = project_dir / "videos"
+        make_test_video(videos_dir / "segment_E2S1.mp4")
+        scripts_dir = project_dir / "scripts"
+        project_data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+        project_data["episodes"].append({"episode": 2, "title": "第二集", "script_file": "scripts/episode_2.json"})
+        (project_dir / "project.json").write_text(json.dumps(project_data, ensure_ascii=False), encoding="utf-8")
+        (scripts_dir / "episode_2.json").write_text(
+            json.dumps(
+                {
+                    "content_mode": "narration",
+                    "segments": [
+                        {
+                            "segment_id": "S1",
+                            "duration_seconds": 8,
+                            "novel_text": "第二集文本",
+                            "generated_assets": {"video_clip": "videos/segment_E2S1.mp4", "status": "completed"},
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*_args, **_kwargs):
+            raise AssertionError("FunASR should not run when funasr_subtitles is disabled")
+
+        monkeypatch.setattr(JianyingDraftService, "_generate_subtitle_cues_for_clips", fail_if_called)
+
+        svc = JianyingDraftService(pm)
+        episode_zip = svc.export_episode_draft(
+            project_name="demo",
+            episode=1,
+            draft_path="/Users/test/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
+        )
+        combined_zip = svc.export_episodes_drafts(
+            project_name="demo",
+            episodes=[1, 2],
+            draft_path="/Users/test/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
+        )
+
+        assert episode_zip.exists()
+        assert combined_zip.exists()
 
     def test_exports_zip_with_scannable_draft_metadata(self, tmp_path):
         """导出 ZIP 补齐剪映草稿列表扫描需要的元信息"""

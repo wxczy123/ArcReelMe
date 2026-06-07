@@ -489,12 +489,14 @@ class API {
     downloadToken: string,
     jianyingVersion: string = "6",
     combine: boolean = true,
+    funasrSubtitles: boolean = false,
   ): string {
     const params = new URLSearchParams({
       draft_path: draftPath,
       download_token: downloadToken,
       jianying_version: jianyingVersion,
       combine: String(combine),
+      funasr_subtitles: String(funasrSubtitles),
     });
     params.set("episodes", episodes.join(","));
     return `${API_BASE}/projects/${encodeURIComponent(projectName)}/export/jianying-draft?${params.toString()}`;
