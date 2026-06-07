@@ -110,6 +110,7 @@ export function GlobalHeader({ onNavigateBack }: GlobalHeaderProps) {
     episodes: number[],
     draftPath: string,
     jianyingVersion: string,
+    combineDrafts: boolean,
   ) => {
     if (!currentProjectName || jianyingExporting || episodes.length === 0) return;
 
@@ -122,6 +123,7 @@ export function GlobalHeader({ onNavigateBack }: GlobalHeaderProps) {
         draftPath,
         download_token,
         jianyingVersion,
+        combineDrafts,
       );
       const episodeLabel = episodes.length === 1 ? String(episodes[0]) : episodes.join("-");
       useAppStore.getState().pushToast(t("dashboard:jianying_export_packaging"), "success");

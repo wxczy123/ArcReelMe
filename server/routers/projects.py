@@ -339,6 +339,7 @@ def export_jianying_draft(
     draft_path: str = Query(..., description="用户本地剪映草稿目录"),
     download_token: str = Query(..., description="下载 token"),
     jianying_version: str = Query("6", description="剪映版本：6 或 5"),
+    combine: bool = Query(True, description="批量导出时是否合并为一个剪映草稿"),
 ):
     """导出一集或多集剪映草稿 ZIP"""
     import jwt as pyjwt
@@ -374,6 +375,7 @@ def export_jianying_draft(
                 project_name=name,
                 episodes=selected_episodes,
                 draft_path=draft_path,
+                combine=combine,
                 use_draft_info_name=(jianying_version != "5"),
             )
             episode_label = "-".join(str(item) for item in selected_episodes)

@@ -420,6 +420,76 @@ class JianyingDraftService:
 
         return draft_name, draft_dir
 
+    def _build_combined_draft_dir(
+        self,
+        *,
+        project_name: str,
+        project: dict,
+        project_dir: Path,
+        episodes: list[int],
+        draft_path: str,
+        tmp_dir: Path,
+        use_draft_info_name: bool,
+    ) -> tuple[str, Path]:
+        """在 tmp_dir 中生成选中剧集合并后的单个剪映草稿目录。"""
+        raw_title = project.get("title", project_name)
+        draft_name = raw_title.replace("/", "_").replace("\\", "_").replace("..", "_")
+        staging_dir = tmp_dir / "staging_combined"
+        staging_dir.mkdir()
+
+        local_clips: list[dict[str, Any]] = []
+        content_modes: list[str] = []
+        first_video_path: Path | None = None
+        for episode in episodes:
+            script_data, _ = self._find_episode_script(project_name, project, episode)
+            content_modes.append(script_data.get("content_mode", "narration"))
+            clips = self._collect_video_clips(script_data, project_dir)
+            if not clips:
+                raise ValueError(f"第 {episode} 集没有已完成的视频片段，请先生成视频")
+            if first_video_path is None:
+                first_video_path = clips[0]["abs_path"]
+
+            for clip in clips:
+                src = clip["abs_path"]
+                dst = staging_dir / src.name
+                try:
+                    dst.hardlink_to(src)
+                except OSError:
+                    shutil.copy2(src, dst)
+                local_clips.append({**clip, "local_path": str(dst)})
+
+        content_mode = "narration" if content_modes and all(mode == "narration" for mode in content_modes) else "drama"
+        width, height = self._resolve_canvas_size(project, first_video_path)
+        draft_dir = tmp_dir / draft_name
+        self._generate_draft(
+            draft_dir=draft_dir,
+            draft_name=draft_name,
+            clips=local_clips,
+            width=width,
+            height=height,
+            content_mode=content_mode,
+        )
+
+        assets_dir = draft_dir / "assets"
+        assets_dir.mkdir(exist_ok=True)
+        for clip in local_clips:
+            src = Path(clip["local_path"])
+            dst = assets_dir / src.name
+            shutil.move(str(src), str(dst))
+
+        draft_content_path = draft_dir / "draft_content.json"
+        self._replace_paths_in_draft(
+            json_path=draft_content_path,
+            tmp_prefix=str(staging_dir),
+            target_prefix=self._join_user_path(draft_path, draft_name, "assets"),
+        )
+        self._finalize_draft_metadata(draft_dir=draft_dir, draft_name=draft_name, draft_path=draft_path)
+
+        if use_draft_info_name:
+            shutil.copy2(draft_content_path, draft_dir / "draft_info.json")
+
+        return draft_name, draft_dir
+
     # ------------------------------------------------------------------
     # 公开方法
     # ------------------------------------------------------------------
@@ -469,6 +539,7 @@ class JianyingDraftService:
         episodes: list[int],
         draft_path: str,
         *,
+        combine: bool = True,
         use_draft_info_name: bool = True,
     ) -> Path:
         """
@@ -488,18 +559,30 @@ class JianyingDraftService:
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="arcreel_jy_"))
         try:
-            draft_dirs = [
-                self._build_episode_draft_dir(
+            if combine:
+                draft_name, draft_dir = self._build_combined_draft_dir(
                     project_name=project_name,
                     project=project,
                     project_dir=project_dir,
-                    episode=episode,
+                    episodes=unique_episodes,
                     draft_path=draft_path,
                     tmp_dir=tmp_dir,
                     use_draft_info_name=use_draft_info_name,
                 )
-                for episode in unique_episodes
-            ]
+                draft_dirs = [(draft_name, draft_dir)]
+            else:
+                draft_dirs = [
+                    self._build_episode_draft_dir(
+                        project_name=project_name,
+                        project=project,
+                        project_dir=project_dir,
+                        episode=episode,
+                        draft_path=draft_path,
+                        tmp_dir=tmp_dir,
+                        use_draft_info_name=use_draft_info_name,
+                    )
+                    for episode in unique_episodes
+                ]
 
             zip_path = tmp_dir / f"{safe_title}_剪映草稿_共{len(unique_episodes)}集.zip"
             self._zip_draft_dirs(zip_path=zip_path, draft_dirs=draft_dirs)

@@ -24,7 +24,12 @@ interface ExportScopeDialogProps {
   onSelect: (scope: ExportScope) => void;
   anchorRef: RefObject<HTMLElement | null>;
   episodes?: EpisodeMeta[];
-  onJianyingExport?: (episodes: number[], draftPath: string, jianyingVersion: string) => void;
+  onJianyingExport?: (
+    episodes: number[],
+    draftPath: string,
+    jianyingVersion: string,
+    combineDrafts: boolean,
+  ) => void;
   jianyingExporting?: boolean;
 }
 
@@ -51,6 +56,7 @@ export function ExportScopeDialog({
     () => localStorage.getItem(DRAFT_PATH_STORAGE_KEY) || defaultDraftPath,
   );
   const [jianyingVersion, setJianyingVersion] = useState("6");
+  const [combineDrafts, setCombineDrafts] = useState(true);
 
   useEffect(() => {
     if (!open) {
@@ -86,7 +92,7 @@ export function ExportScopeDialog({
   const handleJianyingSubmit = () => {
     if (!draftPath.trim() || selectedEpisodes.length === 0 || !onJianyingExport) return;
     localStorage.setItem(DRAFT_PATH_STORAGE_KEY, draftPath.trim());
-    onJianyingExport(selectedEpisodes, draftPath.trim(), jianyingVersion);
+    onJianyingExport(selectedEpisodes, draftPath.trim(), jianyingVersion, combineDrafts);
   };
 
   return (
@@ -272,6 +278,67 @@ export function ExportScopeDialog({
                 </div>
               </FormField>
             )}
+
+            <FormField
+              htmlFor="jianying-draft-mode"
+              label={t("dashboard:jianying_draft_mode")}
+            >
+              <div
+                id="jianying-draft-mode"
+                className="grid gap-2 rounded-md p-2"
+                style={{
+                  background: "oklch(0.16 0.010 265 / 0.6)",
+                  border: "1px solid var(--color-hairline)",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setCombineDrafts(true)}
+                  className="flex cursor-pointer items-start gap-2 text-left text-[13px]"
+                >
+                  <input
+                    id="jianying-draft-mode-combined"
+                    type="radio"
+                    name="jianying-draft-mode"
+                    checked={combineDrafts}
+                    onChange={() => setCombineDrafts(true)}
+                    aria-labelledby="jianying-draft-mode-combined-label"
+                    className="mt-0.5 h-3.5 w-3.5"
+                  />
+                  <span className="min-w-0">
+                    <span id="jianying-draft-mode-combined-label" style={{ color: "var(--color-text)" }}>
+                      {t("dashboard:jianying_draft_mode_combined")}
+                    </span>
+                    <span className="block text-[12px]" style={{ color: "var(--color-text-3)" }}>
+                      {t("dashboard:jianying_draft_mode_combined_hint")}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCombineDrafts(false)}
+                  className="flex cursor-pointer items-start gap-2 text-left text-[13px]"
+                >
+                  <input
+                    id="jianying-draft-mode-separate"
+                    type="radio"
+                    name="jianying-draft-mode"
+                    checked={!combineDrafts}
+                    onChange={() => setCombineDrafts(false)}
+                    aria-labelledby="jianying-draft-mode-separate-label"
+                    className="mt-0.5 h-3.5 w-3.5"
+                  />
+                  <span className="min-w-0">
+                    <span id="jianying-draft-mode-separate-label" style={{ color: "var(--color-text)" }}>
+                      {t("dashboard:jianying_draft_mode_separate")}
+                    </span>
+                    <span className="block text-[12px]" style={{ color: "var(--color-text-3)" }}>
+                      {t("dashboard:jianying_draft_mode_separate_hint")}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </FormField>
 
             <FormField
               htmlFor="jianying-version-select"

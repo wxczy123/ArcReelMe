@@ -88,6 +88,24 @@ describe("API", () => {
     vi.unstubAllGlobals();
   });
 
+  describe("getJianyingDraftDownloadUrl", () => {
+    it("includes selected episodes and draft merge mode", () => {
+      const url = API.getJianyingDraftDownloadUrl(
+        "demo",
+        [1, 3],
+        "C:/drafts",
+        "token",
+        "6",
+        false,
+      );
+
+      expect(url).toContain("/api/v1/projects/demo/export/jianying-draft?");
+      expect(url).toContain("episodes=1%2C3");
+      expect(url).toContain("draft_path=C%3A%2Fdrafts");
+      expect(url).toContain("combine=false");
+    });
+  });
+
   describe("request", () => {
     it("returns parsed JSON and applies default JSON header", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
