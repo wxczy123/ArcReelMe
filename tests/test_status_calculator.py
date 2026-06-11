@@ -220,7 +220,6 @@ class TestStatusCalculator:
         (project_path / "scenes").mkdir(parents=True)
         (project_path / "props").mkdir(parents=True)
         (project_path / "characters" / "A" / "default" / "full_body.png").write_bytes(b"ok")
-        (project_path / "characters" / "A" / "default" / "three_view.png").write_bytes(b"ok")
         (project_path / "scenes" / "S1.png").write_bytes(b"ok")
         (project_path / "props" / "P1.png").write_bytes(b"ok")
 
@@ -242,7 +241,7 @@ class TestStatusCalculator:
                                     "purpose": "storyboard_reference",
                                 },
                                 "three_view": {
-                                    "path": "characters/A/default/three_view.png",
+                                    "path": "",
                                     "purpose": "consistency_review",
                                 },
                             },

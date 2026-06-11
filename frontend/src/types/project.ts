@@ -33,6 +33,7 @@ export interface CharacterForm {
 export interface Character {
   description: string;
   voice_style?: string;
+  character_kind?: "single" | "group";
   default_form?: string;
   forms?: Record<string, CharacterForm>;
   /** Legacy fields may appear in stale local data only. */

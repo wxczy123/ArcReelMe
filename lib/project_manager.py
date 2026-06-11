@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field
 from lib.agent_profile import agent_profile_dir
 from lib.asset_types import ASSET_SPECS
 from lib.character_assets import (
-    CHARACTER_REF_SLOTS,
     DEFAULT_FORM_ID,
     ensure_character_forms,
     get_storyboard_ref_path,
@@ -1813,7 +1812,7 @@ class ProjectManager:
         return self._get_asset_path("prop", project_name, filename)
 
     def get_pending_characters(self, project_name: str) -> list[dict]:
-        """获取待生成角色参考图的角色列表（任一形态槽位缺图即 pending）。"""
+        """获取待生成角色参考图的角色列表（任一形态缺默认分镜输入图即 pending）。"""
         pending_refs = self.get_pending_character_refs(project_name)
         names = []
         seen = set()
@@ -1825,7 +1824,7 @@ class ProjectManager:
         return names
 
     def get_pending_character_refs(self, project_name: str) -> list[dict]:
-        """获取缺 full_body / three_view 的角色形态槽位列表。"""
+        """获取缺默认分镜输入图的角色形态槽位列表。"""
         project = self.load_project(project_name)
         project_dir = self.get_project_path(project_name)
         pending: list[dict] = []
@@ -1835,19 +1834,22 @@ class ProjectManager:
             ensure_character_forms(entry)
             for form_id, form in entry.get("forms", {}).items():
                 refs = form.get("refs", {})
-                for slot in CHARACTER_REF_SLOTS:
-                    ref = refs.get(slot, {})
-                    rel_path = ref.get("path") if isinstance(ref, dict) else ""
-                    if not rel_path or not (project_dir / rel_path).exists():
-                        pending.append(
-                            {
-                                "name": name,
-                                "character": entry,
-                                "form_id": form_id,
-                                "form": form,
-                                "slot": slot,
-                            }
-                        )
+                try:
+                    slot = validate_ref_slot(str(form.get("storyboard_ref_slot") or "three_view"))
+                except ValueError:
+                    slot = "three_view"
+                ref = refs.get(slot, {})
+                rel_path = ref.get("path") if isinstance(ref, dict) else ""
+                if not rel_path or not (project_dir / rel_path).exists():
+                    pending.append(
+                        {
+                            "name": name,
+                            "character": entry,
+                            "form_id": form_id,
+                            "form": form,
+                            "slot": slot,
+                        }
+                    )
         return pending
 
     # ==================== 角色/场景/道具直接写入工具 ====================

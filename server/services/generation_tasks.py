@@ -18,6 +18,7 @@ from lib.character_assets import (
     DEFAULT_FORM_ID,
     character_ref_resource_id,
     ensure_character_forms,
+    get_character_kind,
     get_ref_path,
     get_storyboard_ref_path,
     set_ref_path,
@@ -436,8 +437,10 @@ def get_aspect_ratio(project: dict, resource_type: str) -> str:
     return "9:16" if project.get("content_mode", "narration") == "narration" else "16:9"
 
 
-def get_character_ref_aspect_ratio(slot: str) -> str:
+def get_character_ref_aspect_ratio(slot: str, character_kind: str = "single") -> str:
     """角色参考图按槽位指定默认比例。"""
+    if character_kind == "group":
+        return "16:9"
     return "9:16" if slot == "full_body" else "16:9"
 
 
@@ -1050,6 +1053,7 @@ async def execute_character_ref_task(
             raise ValueError(f"character not found: {character_name}")
         _char_data = _project["characters"][character_name]
         ensure_character_forms(_char_data)
+        _character_kind = get_character_kind(_char_data)
         _forms = _char_data.get("forms") or {}
         if form_id not in _forms:
             raise ValueError(f"character form not found: {character_name}/{form_id}")
@@ -1067,6 +1071,7 @@ async def execute_character_ref_task(
                 str(_form.get("description") or ""),
                 _style,
                 _style_desc,
+                _character_kind,
             )
         else:
             _full_prompt = build_character_full_body_prompt(
@@ -1076,6 +1081,7 @@ async def execute_character_ref_task(
                 str(_form.get("description") or ""),
                 _style,
                 _style_desc,
+                _character_kind,
             )
         _ref_images: list[Path] = []
         if slot == "three_view":
@@ -1091,13 +1097,13 @@ async def execute_character_ref_task(
                 _full_ref = _project_path / _ref_path
                 if _full_ref.exists():
                     _ref_images.append(_full_ref)
-        return _project, _full_prompt, _ref_images
+        return _project, _full_prompt, _ref_images, _character_kind
 
-    project, full_prompt, reference_images = await asyncio.to_thread(_prepare_char)
+    project, full_prompt, reference_images, character_kind = await asyncio.to_thread(_prepare_char)
     _needs_i2i = bool(reference_images)
 
     generator = await get_media_generator(project_name, payload=payload, user_id=user_id, needs_i2i=_needs_i2i)
-    aspect_ratio = get_character_ref_aspect_ratio(slot)
+    aspect_ratio = get_character_ref_aspect_ratio(slot, character_kind)
 
     image_provider_id, image_model_id = await _resolve_effective_image_backend(project, payload, needs_i2i=_needs_i2i)
     image_size = await resolve_resolution(project, image_provider_id, image_model_id)

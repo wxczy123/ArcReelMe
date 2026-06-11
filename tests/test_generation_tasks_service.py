@@ -566,6 +566,8 @@ class TestGetAspectRatio:
     def test_character_ref_aspect_ratio_depends_on_slot(self):
         assert generation_tasks.get_character_ref_aspect_ratio("full_body") == "9:16"
         assert generation_tasks.get_character_ref_aspect_ratio("three_view") == "16:9"
+        assert generation_tasks.get_character_ref_aspect_ratio("full_body", "group") == "16:9"
+        assert generation_tasks.get_character_ref_aspect_ratio("three_view", "group") == "16:9"
 
     def test_scenes_and_props_always_16_9(self):
         project = {"aspect_ratio": "9:16"}

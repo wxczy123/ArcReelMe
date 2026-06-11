@@ -15,6 +15,9 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 _CHARACTER_FULL_BODY_LAYOUT = "单人全身参考图，角色从头到脚完整入画，纯白色背景，不要文字。"
+_CHARACTER_GROUP_LAYOUT = (
+    "群体参考图，多名成员完整入画，展示群体服饰体系、整体外貌特征、自然个体差异和常见站位队形。纯净浅色背景，不要文字。"
+)
 _CHARACTER_THREE_VIEW_LAYOUT = "三视图角色参考图，纯净浅色背景，横向并列展示同一角色的正面、侧面、背面全身 A-Pose。"
 _PROP_LAYOUT = "三视图水平排列于纯净浅灰背景：左侧正面全视图、中间 45° 侧视图体现立体感、右侧关键细节特写。"
 _PROP_GUARD = "外观结构完整，焦点清晰。"
@@ -51,16 +54,14 @@ def build_character_full_body_prompt(
     form_description: str = "",
     style: str = "",
     style_description: str = "",
+    character_kind: str = "single",
 ) -> str:
-    """角色单人全身主参考图 prompt。"""
+    """角色全身主参考图 prompt；群体角色使用群体参考图布局。"""
     style_block = _style_prefix(style, style_description)
     character_text = _join_descriptions(description, form_description)
-    return (
-        f"{style_block}"
-        f"角色「{name}」单人全身参考图。\n\n"
-        f"{character_text}\n\n"
-        f"{_CHARACTER_FULL_BODY_LAYOUT}"
-    )
+    if character_kind == "group":
+        return f"{style_block}角色群体「{name}」参考图。\n\n{character_text}\n\n{_CHARACTER_GROUP_LAYOUT}"
+    return f"{style_block}角色「{name}」单人全身参考图。\n\n{character_text}\n\n{_CHARACTER_FULL_BODY_LAYOUT}"
 
 
 def build_character_three_view_prompt(
@@ -70,10 +71,19 @@ def build_character_three_view_prompt(
     form_description: str = "",
     style: str = "",
     style_description: str = "",
+    character_kind: str = "single",
 ) -> str:
     """角色三视图 prompt。"""
     style_block = _style_prefix(style, style_description)
     character_text = _join_descriptions(description, form_description)
+    if character_kind == "group":
+        return (
+            f"{style_block}"
+            f"角色群体「{name}」一致性参考图。\n\n"
+            f"{character_text}\n\n"
+            f"横向展示多名代表成员，体现群体服饰体系、整体外貌特征和自然个体差异。"
+            f"纯净浅色背景，不要文字。"
+        )
     return (
         f"{style_block}"
         f"角色「{name}」的三视图一致性参考图。\n\n"
@@ -91,23 +101,13 @@ def build_character_prompt(name: str, description: str, style: str = "", style_d
 def build_scene_prompt(name: str, description: str, style: str = "", style_description: str = "") -> str:
     """场景设计图 prompt。"""
     style_block = _style_prefix(style, style_description)
-    return (
-        f"{style_block}"
-        f"标志性场景「{name}」的视觉参考。\n\n"
-        f"{description}"
-    )
+    return f"{style_block}标志性场景「{name}」的视觉参考。\n\n{description}"
 
 
 def build_prop_prompt(name: str, description: str, style: str = "", style_description: str = "") -> str:
     """道具设计图 prompt（三视图）。"""
     style_block = _style_prefix(style, style_description)
-    return (
-        f"{style_block}"
-        f"道具「{name}」的多视角展示。\n\n"
-        f"{description}\n\n"
-        f"{_PROP_LAYOUT}\n\n"
-        f"{_PROP_GUARD}"
-    )
+    return f"{style_block}道具「{name}」的多视角展示。\n\n{description}\n\n{_PROP_LAYOUT}\n\n{_PROP_GUARD}"
 
 
 # ---------------------------------------------------------------------------

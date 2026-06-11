@@ -13,6 +13,7 @@ from typing import Any
 
 from lib.asset_types import ASSET_TYPES
 from lib.character_assets import (
+    CHARACTER_KINDS,
     CHARACTER_REF_SLOTS,
     DEFAULT_FORM_ID,
     DEFAULT_STORYBOARD_REF_SLOT,
@@ -212,6 +213,9 @@ class DataValidator:
                     continue
                 if not char_data.get("description"):
                     errors.append(f"角色 '{char_name}' 缺少必填字段: description")
+                character_kind = str(char_data.get("character_kind") or "single")
+                if character_kind not in CHARACTER_KINDS:
+                    errors.append(f"角色 '{char_name}' character_kind 无效: {character_kind}")
                 char_data = ensure_character_forms(dict(char_data))
                 forms = char_data.get("forms")
                 if not isinstance(forms, dict) or not forms:

@@ -145,6 +145,9 @@ def build_asset_router(
                             entry["description"] = req["description"]
                         if req.get("voice_style") is not None:
                             entry["voice_style"] = req["voice_style"]
+                        if req.get("character_kind") is not None:
+                            entry["character_kind"] = req["character_kind"]
+                            ensure_character_forms(entry)
                         if req.get(spec.sheet_field) is not None:
                             set_ref_path(
                                 entry,

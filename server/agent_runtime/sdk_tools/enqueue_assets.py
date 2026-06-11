@@ -8,7 +8,6 @@ from claude_agent_sdk import tool
 
 from lib.asset_types import ASSET_SPECS, AssetSpec
 from lib.character_assets import (
-    CHARACTER_REF_SLOTS,
     DEFAULT_FORM_ID,
     character_ref_resource_id,
     ensure_character_forms,
@@ -212,7 +211,7 @@ def generate_assets_tool(ctx: ToolContext):
 def list_pending_character_refs_tool(ctx: ToolContext):
     @tool(
         "list_pending_character_refs",
-        "列出项目内缺失的角色形态参考图槽位（full_body / three_view）。",
+        "列出项目内缺失的角色形态默认分镜输入图。",
         {
             "type": "object",
             "properties": {
@@ -300,21 +299,30 @@ def _build_character_ref_specs(
             except ValueError as exc:
                 warnings.append(f"⚠️  {exc}")
                 continue
-            raw_slots = target.get("slots") or list(CHARACTER_REF_SLOTS)
-            slots: list[str] = []
-            for raw_slot in raw_slots:
-                try:
-                    slots.append(validate_ref_slot(str(raw_slot)))
-                except ValueError as exc:
-                    warnings.append(f"⚠️  {exc}")
             char_data = characters.get(character)
             if not isinstance(char_data, dict):
                 warnings.append(f"⚠️  角色 '{character}' 不存在于 project.json 中，跳过")
                 continue
+            ensure_character_forms(char_data)
             forms = char_data.get("forms") if isinstance(char_data.get("forms"), dict) else {}
             if form_id not in forms:
                 warnings.append(f"⚠️  角色 '{character}' 不存在形态 '{form_id}'，跳过")
                 continue
+            raw_slots = target.get("slots")
+            if raw_slots:
+                slots: list[str] = []
+                for raw_slot in raw_slots:
+                    try:
+                        slots.append(validate_ref_slot(str(raw_slot)))
+                    except ValueError as exc:
+                        warnings.append(f"⚠️  {exc}")
+            else:
+                form = forms[form_id]
+                try:
+                    slots = [validate_ref_slot(str(form.get("storyboard_ref_slot") or "three_view"))]
+                except ValueError as exc:
+                    warnings.append(f"⚠️  {exc}")
+                    slots = []
             for slot in dict.fromkeys(slots):
                 specs.append(
                     BatchTaskSpec(

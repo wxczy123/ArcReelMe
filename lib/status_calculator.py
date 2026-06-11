@@ -8,7 +8,7 @@
 import logging
 from pathlib import Path
 
-from lib.character_assets import CHARACTER_REF_SLOTS, ensure_character_forms
+from lib.character_assets import ensure_character_forms, validate_ref_slot
 from lib.project_manager import effective_mode
 
 logger = logging.getLogger(__name__)
@@ -301,12 +301,7 @@ class StatusCalculator:
                 continue
             ensure_character_forms(c)
             forms = c.get("forms", {})
-            if forms and all(
-                self._safe_exists(project_dir, form.get("refs", {}).get(slot, {}).get("path", ""))
-                for form in forms.values()
-                if isinstance(form, dict)
-                for slot in CHARACTER_REF_SLOTS
-            ):
+            if forms and all(self._character_form_ready(project_dir, form) for form in forms.values()):
                 chars_done += 1
 
         # 场景统计
@@ -349,6 +344,17 @@ class StatusCalculator:
                 "completed": sum(1 for s in episodes_stats if s["status"] == "completed"),
             },
         }
+
+    def _character_form_ready(self, project_dir: Path, form: dict) -> bool:
+        if not isinstance(form, dict):
+            return False
+        try:
+            slot = validate_ref_slot(str(form.get("storyboard_ref_slot") or "three_view"))
+        except ValueError:
+            return False
+        ref = form.get("refs", {}).get(slot, {})
+        rel_path = ref.get("path") if isinstance(ref, dict) else ""
+        return self._safe_exists(project_dir, rel_path)
 
     def enrich_project(self, project_name: str, project: dict) -> dict:
         """
